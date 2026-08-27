@@ -1,0 +1,17 @@
+# Credentials and local runtime state
+.env
+.env.*
+!.env.example
+config.local.toml
+data/
+runs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Submission artefacts and source prompt are kept outside the repository
+*.mp4
+*.zip
+推免考核题目学生版.pdf
