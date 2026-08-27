@@ -17,4 +17,4 @@
 
 ## 立即开始
 
-当前先按 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) 的 P0--P1 实施。每完成一个检查点，运行 `powershell -ExecutionPolicy Bypass -File tools/status.ps1` 查看计划、Git 和远端状态；再用 `tools/checkpoint.ps1` 创建小而可解释的提交。远端配置后该脚本才会推送，避免误推送。
+按 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) 的 P0--P6 实施。每完成一个检查点，运行 `powershell -ExecutionPolicy Bypass -File tools/status.ps1` 查看计划、Git 和远端状态；再用 `tools/checkpoint.ps1` 创建小而可解释的提交。交付前运行 `tools/verify.ps1`。远端配置后检查点脚本才会推送，避免误推送。

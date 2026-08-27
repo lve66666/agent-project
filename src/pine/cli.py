@@ -12,6 +12,7 @@ from .config import ConfigurationError, load_settings
 from .model_client import OpenAICompatibleClient
 from .tool_registry import build_default_registry
 from .workspace import Workspace, WorkspaceError
+from .trace import TraceWriter
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,7 +56,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Workspace error: {error}", file=sys.stderr)
         return 2
     client = OpenAICompatibleClient(api_key=settings.api_key, base_url=settings.base_url, model=settings.model)
-    result = AgentLoop(client, registry, max_turns=settings.max_turns, max_seconds=settings.max_seconds).run(args.task)
+    trace = TraceWriter(args.trace_dir)
+    trace.record("run_started", task=args.task, workspace=str(workspace), model=settings.model)
+    result = AgentLoop(client, registry, max_turns=settings.max_turns, max_seconds=settings.max_seconds, trace=trace).run(args.task)
     print(result.summary)
     print(f"Stop reason: {result.reason.value}; turns: {result.turns}; tool calls: {len(result.tool_results)}")
     return 0 if result.reason.value == "completed" else 1

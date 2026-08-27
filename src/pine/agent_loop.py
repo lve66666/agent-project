@@ -8,17 +8,21 @@ from threading import Event
 from .model_client import ModelClient, ModelError
 from .protocol import AssistantReply, Message, RunResult, StopReason, ToolResult
 from .tool_registry import ToolRegistry
+from .context import ContextWindow
+from .trace import TraceWriter
 
 SYSTEM_PROMPT = "You are Pine, a coding agent. Use tools to inspect and modify only the assigned workspace. Explain the completed work concisely after verification."
 
 
 class AgentLoop:
-    def __init__(self, client: ModelClient, tools: ToolRegistry, *, max_turns: int, max_seconds: int, cancelled: Event | None = None) -> None:
+    def __init__(self, client: ModelClient, tools: ToolRegistry, *, max_turns: int, max_seconds: int, cancelled: Event | None = None, context: ContextWindow | None = None, trace: TraceWriter | None = None) -> None:
         self.client = client
         self.tools = tools
         self.max_turns = max_turns
         self.max_seconds = max_seconds
         self.cancelled = cancelled or Event()
+        self.context = context or ContextWindow()
+        self.trace = trace
 
     def run(self, task: str) -> RunResult:
         messages: list[Message] = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": task}]
@@ -30,18 +34,31 @@ class AgentLoop:
             if time.monotonic() >= deadline:
                 return RunResult(StopReason.TIMEOUT, "Run exceeded its total time budget.", turn - 1, tuple(results))
             try:
-                reply = self.client.complete(messages, self.tools.schemas())
+                request_messages = self.context.prepare(messages)
+                if self.trace:
+                    self.trace.record("model_request", turn=turn, message_count=len(request_messages))
+                reply = self.client.complete(request_messages, self.tools.schemas())
             except ModelError as error:
+                if self.trace:
+                    self.trace.record("model_error", turn=turn, error=str(error))
                 return RunResult(StopReason.MODEL_ERROR, f"Model error: {error}", turn - 1, tuple(results))
             except Exception as error:
                 return RunResult(StopReason.PROTOCOL_ERROR, f"Unexpected model client error: {error}", turn - 1, tuple(results))
             messages.append(_assistant_message(reply))
+            if self.trace:
+                self.trace.record("assistant_reply", turn=turn, content=reply.content, tool_calls=[call.name for call in reply.tool_calls])
             if not reply.tool_calls:
+                if self.trace:
+                    self.trace.record("run_finished", reason=StopReason.COMPLETED.value, turns=turn)
                 return RunResult(StopReason.COMPLETED, reply.content or "Task completed.", turn, tuple(results))
             for call in reply.tool_calls:
                 result = self.tools.execute(call)
                 results.append(result)
+                if self.trace:
+                    self.trace.record("tool_result", turn=turn, tool=call.name, ok=result.ok, content=result.content)
                 messages.append({"role": "tool", "tool_call_id": call.id, "name": call.name, "content": result.content})
+        if self.trace:
+            self.trace.record("run_finished", reason=StopReason.MAX_TURNS.value, turns=self.max_turns)
         return RunResult(StopReason.MAX_TURNS, "Run reached the maximum number of model turns.", self.max_turns, tuple(results))
 
 
