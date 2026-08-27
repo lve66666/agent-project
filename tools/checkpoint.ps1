@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$Message,
-    [string[]]$Paths = @('src', 'tests', 'docs', 'tools', 'README.md', 'README.txt', '.gitignore', 'pyproject.toml'),
+    [string[]]$Paths = @('src', 'tests', 'docs', 'tools', 'demo_project', 'README.md', 'README.txt', '.gitignore', 'pyproject.toml'),
     [switch]$Push
 )
 
