@@ -6,7 +6,12 @@ import argparse
 import sys
 from pathlib import Path
 
+from .agent_loop import AgentLoop
+from .command_runner import CommandRunner
 from .config import ConfigurationError, load_settings
+from .model_client import OpenAICompatibleClient
+from .tool_registry import build_default_registry
+from .workspace import Workspace, WorkspaceError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,10 +41,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Configuration error: workspace is not a directory: {workspace}", file=sys.stderr)
         return 2
 
-    # The remaining runtime is wired in P4; retaining these values makes P1 executable and inspectable.
-    print(f"Pine configured for {workspace} with model {settings.model}.")
-    print("Agent runtime is being assembled; complete P4 before executing tasks.")
-    return 0
+    def confirm(command: str) -> bool:
+        try:
+            return input(f"Allow command in {workspace}? {command}\n[y/N] ").strip().lower() in {"y", "yes"}
+        except EOFError:
+            return False
+
+    try:
+        confined_workspace = Workspace(workspace)
+        runner = CommandRunner(confined_workspace, approve_all=args.yes, confirmer=confirm)
+        registry = build_default_registry(confined_workspace, runner)
+    except WorkspaceError as error:
+        print(f"Workspace error: {error}", file=sys.stderr)
+        return 2
+    client = OpenAICompatibleClient(api_key=settings.api_key, base_url=settings.base_url, model=settings.model)
+    result = AgentLoop(client, registry, max_turns=settings.max_turns, max_seconds=settings.max_seconds).run(args.task)
+    print(result.summary)
+    print(f"Stop reason: {result.reason.value}; turns: {result.turns}; tool calls: {len(result.tool_results)}")
+    return 0 if result.reason.value == "completed" else 1
 
 
 if __name__ == "__main__":

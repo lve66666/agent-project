@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from pine.cli import main
 from pine.config import ConfigurationError, load_settings
+from pine.protocol import AssistantReply
 
 
 class ConfigAndCliTests(unittest.TestCase):
@@ -27,7 +28,10 @@ class ConfigAndCliTests(unittest.TestCase):
     def test_cli_accepts_valid_configuration(self) -> None:
         stdout = io.StringIO()
         with tempfile.TemporaryDirectory() as directory:
-            with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), redirect_stdout(stdout):
+            with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), patch(
+                "pine.cli.OpenAICompatibleClient"
+            ) as client_class, redirect_stdout(stdout):
+                client_class.return_value.complete.return_value = AssistantReply("finished")
                 code = main(["inspect files", "--workspace", directory])
         self.assertEqual(code, 0)
-        self.assertIn("Pine configured", stdout.getvalue())
+        self.assertIn("finished", stdout.getvalue())
