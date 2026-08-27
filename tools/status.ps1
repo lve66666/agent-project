@@ -14,7 +14,8 @@ $branch = git branch --show-current 2>$null
 $changes = git status --short
 $remotes = @(git remote)
 $remote = if ($remotes -contains 'origin') { git remote get-url origin } else { $null }
-$head = git log -1 --oneline 2>$null
+$headObject = git rev-parse --quiet --verify HEAD
+$head = if ($LASTEXITCODE -eq 0) { git log -1 --oneline } else { $null }
 
 Write-Output "Branch: $(if ($branch) { $branch } else { '(no commit yet)' })"
 Write-Output "HEAD: $(if ($head) { $head } else { '(no commit yet)' })"
