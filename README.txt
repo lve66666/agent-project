@@ -8,7 +8,7 @@
 3. 运行记录写入 runs/ 下的 JSONL 文件；使用 python -m unittest discover -s tests -v 运行离线测试。
 
 特色与设计：
-- 不使用任何 Agent 框架；本地自行实现模型协议解析、工具注册与参数校验、循环终止、上下文裁剪、错误处理和 JSONL 审计。
+- 不使用任何 Agent 框架或运行时第三方依赖；本地自行实现模型协议解析、工具注册与参数校验、循环终止、上下文裁剪、错误处理和 JSONL 审计。
 - 仅提供 list_files、read_file、write_file、run_command 四个工具。所有路径必须位于 workspace；命令有确认、超时和输出上限。
 - 模型只提出下一步建议，不能直接访问文件或 shell；本地状态机决定是否执行并在达到轮数/时间预算时停止。
 

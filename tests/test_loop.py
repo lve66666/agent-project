@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pine.agent_loop import AgentLoop
 from pine.command_runner import CommandRunner
-from pine.model_client import ModelError, parse_chat_completion
+from pine.model_client import ModelError, ModelProtocolError, parse_chat_completion
 from pine.protocol import AssistantReply, StopReason, ToolCall
 from pine.tool_registry import build_default_registry
 from pine.workspace import Workspace
@@ -26,6 +26,11 @@ class FakeModel:
 class BrokenModel:
     def complete(self, messages, tools):
         raise ModelError("network unavailable")
+
+
+class MalformedModel:
+    def complete(self, messages, tools):
+        raise ModelProtocolError("malformed response")
 
 
 class AgentLoopTests(unittest.TestCase):
@@ -65,9 +70,11 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(result.reason, StopReason.MAX_TURNS)
         error = AgentLoop(BrokenModel(), self.registry, max_turns=1, max_seconds=30).run("error")
         self.assertEqual(error.reason, StopReason.MODEL_ERROR)
+        protocol = AgentLoop(MalformedModel(), self.registry, max_turns=1, max_seconds=30).run("protocol")
+        self.assertEqual(protocol.reason, StopReason.PROTOCOL_ERROR)
 
     def test_openai_response_parser_validates_protocol(self) -> None:
         reply = parse_chat_completion({"choices": [{"message": {"content": "ok"}}]})
         self.assertEqual(reply.content, "ok")
-        with self.assertRaises(ModelError):
+        with self.assertRaises(ModelProtocolError):
             parse_chat_completion({"choices": []})

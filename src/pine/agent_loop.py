@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from threading import Event
 
-from .model_client import ModelClient, ModelError
+from .model_client import ModelClient, ModelError, ModelProtocolError
 from .protocol import AssistantReply, Message, RunResult, StopReason, ToolResult
 from .tool_registry import ToolRegistry
 from .context import ContextWindow
@@ -38,6 +38,10 @@ class AgentLoop:
                 if self.trace:
                     self.trace.record("model_request", turn=turn, message_count=len(request_messages))
                 reply = self.client.complete(request_messages, self.tools.schemas())
+            except ModelProtocolError as error:
+                if self.trace:
+                    self.trace.record("protocol_error", turn=turn, error=str(error))
+                return RunResult(StopReason.PROTOCOL_ERROR, f"Model protocol error: {error}", turn - 1, tuple(results))
             except ModelError as error:
                 if self.trace:
                     self.trace.record("model_error", turn=turn, error=str(error))

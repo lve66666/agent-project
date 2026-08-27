@@ -16,7 +16,7 @@
 
 ## 2. 技术方案
 
-选用 Python 3.11+、`argparse`、`pathlib`、`subprocess`、`json` 等标准库及轻量 HTTP 客户端 `httpx`。不引入 LangChain、LlamaIndex、OpenAI Agents SDK、AutoGen、CrewAI 或任何 Agent 框架。即使模型端支持 tool calling，也只把它视作 JSON 通信格式；工具注册、参数验证、执行与结果回填均在本地实现。
+选用 Python 3.11+ 及 `argparse`、`pathlib`、`subprocess`、`json`、`urllib` 等标准库。运行时无第三方依赖，不引入 LangChain、LlamaIndex、OpenAI Agents SDK、AutoGen、CrewAI 或任何 Agent 框架。即使模型端支持 tool calling，也只把它视作 JSON 通信格式；工具注册、参数验证、执行与结果回填均在本地实现。
 
 建议目录：
 
