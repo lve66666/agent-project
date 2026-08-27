@@ -12,7 +12,7 @@
 | P3 命令工具 | 已完成 | `unittest`：11 项通过，1 项符号链接权限跳过 | 实现工具 schema、模型协议解析和 Agent 循环 |
 | P4 Agent 循环 | 已完成 | `unittest`：15 项通过，FakeModel 覆盖多轮工具调用 | 实现上下文裁剪、JSONL 轨迹和敏感信息脱敏 |
 | P5 上下文与轨迹 | 已完成 | `unittest`：17 项通过，1 项符号链接权限跳过 | 准备 calculator 演示、README.txt 和提交物检查 |
-| P6 演示与提交 | 进行中 | `tools/verify.ps1`：17 项通过，README.txt 690 字符 | 用真实 API 在 demo_project 录制视频并填写仓库地址 |
+| P6 演示与提交 | 进行中 | `tools/verify.ps1`：17 项通过；模拟 HTTP CLI 端到端通过；README.txt 699 字符 | 用真实 API 在 demo_project 录制视频并填写仓库地址 |
 
 ## 本次计划
 
