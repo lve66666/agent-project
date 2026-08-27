@@ -15,12 +15,17 @@ foreach ($path in $Paths) {
     }
 }
 
-if (-not (git diff --cached --quiet)) {
+$hasStagedChanges = $false
+git diff --cached --quiet
+if ($LASTEXITCODE -ne 0) {
+    $hasStagedChanges = $true
+}
+
+if ($hasStagedChanges) {
     git commit -m $Message
     Write-Output 'Created checkpoint commit.'
 } else {
-    Write-Output 'No selected changes to commit.'
-    exit 0
+    Write-Output 'No selected changes to commit; keeping the current HEAD.'
 }
 
 if ($Push) {
