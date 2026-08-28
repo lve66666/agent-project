@@ -1,4 +1,4 @@
-仓库地址：待配置公开 GitHub/Gitee 地址
+仓库地址：https://github.com/lve66666/agent-project
 
 项目：Pine Agent，一个从零实现的命令行编程智能体。它通过 OpenAI 兼容模型 API 完成真实的“读文件、修改代码、运行测试、根据失败结果继续修复”任务。
 
