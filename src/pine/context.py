@@ -11,16 +11,20 @@ from .protocol import Message
 class ContextWindow:
     """Keeps complete assistant/tool groups so tool call IDs never become orphaned."""
 
-    def __init__(self, max_chars: int = 24_000) -> None:
+    def __init__(self, max_chars: int = 24_000, max_tool_chars: int = 8_000) -> None:
         if max_chars < 1_000:
             raise ValueError("max context budget must be at least 1000 characters")
+        if max_tool_chars < 256:
+            raise ValueError("max tool output budget must be at least 256 characters")
         self.max_chars = max_chars
+        self.max_tool_chars = max_tool_chars
 
     def prepare(self, messages: list[Message]) -> list[Message]:
-        if self._size(messages) <= self.max_chars:
-            return messages
-        pinned = self._pinned(messages)
-        remaining = messages[len(pinned) :]
+        prepared = [self._compact_tool_message(message) for message in messages]
+        if self._size(prepared) <= self.max_chars:
+            return prepared
+        pinned = self._pinned(prepared)
+        remaining = prepared[len(pinned) :]
         groups = _group_turns(remaining)
         kept: list[list[Message]] = []
         budget_used = self._size(pinned)
@@ -38,6 +42,22 @@ class ContextWindow:
             "content": f"Earlier history was compacted locally: {omitted} complete turn group(s) omitted. Continue from the retained recent tool results.",
         }
         return [*pinned, summary, *[message for group in reversed(kept) for message in group]]
+
+    def _compact_tool_message(self, message: Message) -> Message:
+        """Return a copy with oversized tool output shortened at the middle."""
+        compacted = dict(message)
+        if compacted.get("role") != "tool":
+            return compacted
+        content = compacted.get("content")
+        if not isinstance(content, str) or len(content) <= self.max_tool_chars:
+            return compacted
+        original_size = len(content)
+        marker = f"\n... tool output truncated: {original_size} -> {self.max_tool_chars} chars ...\n"
+        available = self.max_tool_chars - len(marker)
+        head_size = max(1, available // 2)
+        tail_size = max(1, available - head_size)
+        compacted["content"] = content[:head_size] + marker + content[-tail_size:]
+        return compacted
 
     @staticmethod
     def _pinned(messages: list[Message]) -> list[Message]:
