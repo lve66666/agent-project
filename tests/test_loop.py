@@ -55,6 +55,26 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual((self.root / "answer.txt").read_text(encoding="utf-8"), "42\n")
         self.assertEqual([request[0][-1]["role"] for request in model.requests[1:]], ["tool", "tool"])
 
+    def test_loop_emits_observable_local_events(self) -> None:
+        events = []
+        model = FakeModel([
+            AssistantReply(None, (ToolCall("call-1", "list_files", "{}"),)),
+            AssistantReply("Finished."),
+        ])
+        result = AgentLoop(
+            model,
+            self.registry,
+            max_turns=2,
+            max_seconds=30,
+            on_event=lambda name, payload: events.append((name, payload)),
+        ).run("inspect files")
+        self.assertEqual(result.reason, StopReason.COMPLETED)
+        self.assertEqual(
+            [name for name, _ in events],
+            ["model_request", "assistant_reply", "tool_result", "model_request", "assistant_reply", "run_finished"],
+        )
+        self.assertEqual(events[2][1]["tool"], "list_files")
+
     def test_unknown_tool_is_returned_to_model(self) -> None:
         model = FakeModel([
             AssistantReply(None, (ToolCall("call-1", "erase_disk", "{}"),)),

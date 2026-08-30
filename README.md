@@ -18,3 +18,14 @@
 ## 立即开始
 
 按 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) 的 P0--P6 实施。每完成一个检查点，运行 `powershell -ExecutionPolicy Bypass -File tools/status.ps1` 查看计划、Git 和远端状态；再用 `tools/checkpoint.ps1` 创建小而可解释的提交。交付前运行 `tools/verify.ps1`。远端配置后检查点脚本才会推送，避免误推送。
+
+## Desktop GUI
+
+启动桌面界面：
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m pine.gui
+```
+
+在界面中填写 API key、Base URL、模型名、任务和 workspace。API key 只保存在当前 GUI 进程，不会写入文件或 JSONL 轨迹。执行日志实时显示模型请求、工具调用和工具结果；关闭“Auto-approve commands”后，每条命令都会弹窗确认。
