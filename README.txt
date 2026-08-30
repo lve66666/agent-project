@@ -9,7 +9,7 @@
 
 特色与设计：
 - 不使用任何 Agent 框架或运行时第三方依赖；本地自行实现模型协议解析、工具注册与参数校验、循环终止、上下文裁剪、错误处理和 JSONL 审计。
-- 提供 list_files、search_text、read_file、write_file、run_command 五个工具。所有路径必须位于 workspace；搜索限制文本大小和结果数，命令有确认、超时和输出上限；GUI 实时显示每轮执行事件。
+- 提供 list_files、search_text、read_file、write_file、run_command 五个工具。所有路径必须位于 workspace；搜索限制文本大小和结果数，命令有确认、超时和输出上限；GUI 的连接信息放在独立设置弹窗，实时显示每轮执行事件。
 - 模型只提出下一步建议，不能直接访问文件或 shell；本地状态机决定是否执行并在达到轮数/时间预算时停止。
 
 安全：密钥只从环境变量读取，不写入仓库、轨迹或视频。演示使用独立 demo_project 目录；提交截止后不再推送。

@@ -57,6 +57,7 @@ class PineGui(ttk.Frame):
         self.trace_var = tk.StringVar(value=str(root / "runs"))
         self.approve_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Ready")
+        self.connection_status_var = tk.StringVar(value="Configured" if self.api_key_var.get() else "Not configured")
 
     def _build_layout(self) -> None:
         self.master.title("Pine Agent")
@@ -67,20 +68,22 @@ class PineGui(ttk.Frame):
         self.columnconfigure(1, weight=1)
         self.rowconfigure(1, weight=1)
 
-        ttk.Label(self, text="Pine Agent", style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Label(self, text="Local tools, visible execution, bounded runs", style="Subtitle.TLabel").grid(row=0, column=1, sticky="e")
+        ttk.Label(self, text="Pine Agent", style="Title.TLabel").grid(row=0, column=0, sticky="w")
+        header = ttk.Frame(self)
+        header.grid(row=0, column=1, sticky="e")
+        ttk.Label(header, text="Local tools, visible execution, bounded runs", style="Subtitle.TLabel").grid(row=0, column=0, padx=(0, 12))
+        ttk.Button(header, text="Connection Settings", command=self._open_connection_dialog).grid(row=0, column=1)
 
         settings = ttk.LabelFrame(self, text="Run Settings", padding=12)
         settings.grid(row=1, column=0, sticky="nsw", padx=(0, 14), pady=(14, 0))
-        self._setting_row(settings, 0, "Workspace", self.workspace_var, self._choose_workspace)
-        self._setting_row(settings, 1, "API key", self.api_key_var, None, show="*")
-        self._setting_row(settings, 2, "Base URL", self.base_url_var)
-        self._setting_row(settings, 3, "Model", self.model_var)
-        self._setting_row(settings, 4, "Max turns", self.turns_var)
-        self._setting_row(settings, 5, "Max seconds", self.seconds_var)
-        self._setting_row(settings, 6, "Trace directory", self.trace_var, self._choose_trace_dir)
-        ttk.Checkbutton(settings, text="Auto-approve commands", variable=self.approve_var).grid(row=7, column=0, columnspan=3, sticky="w", pady=(8, 0))
-        ttk.Label(settings, text="Without auto-approve, every command opens a confirmation dialog.", wraplength=270, style="Hint.TLabel").grid(row=8, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        ttk.Button(settings, text="Connection Settings", command=self._open_connection_dialog).grid(row=0, column=0, columnspan=3, sticky="ew")
+        ttk.Label(settings, textvariable=self.connection_status_var, style="Hint.TLabel").grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 8))
+        self._setting_row(settings, 2, "Workspace", self.workspace_var, self._choose_workspace)
+        self._setting_row(settings, 3, "Max turns", self.turns_var)
+        self._setting_row(settings, 4, "Max seconds", self.seconds_var)
+        self._setting_row(settings, 5, "Trace directory", self.trace_var, self._choose_trace_dir)
+        ttk.Checkbutton(settings, text="Auto-approve commands", variable=self.approve_var).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(settings, text="Without auto-approve, every command opens a confirmation dialog.", wraplength=270, style="Hint.TLabel").grid(row=7, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
         content = ttk.Frame(self)
         content.grid(row=1, column=1, sticky="nsew", pady=(14, 0))
@@ -120,6 +123,46 @@ class PineGui(ttk.Frame):
         if selected:
             self.trace_var.set(selected)
 
+    def _open_connection_dialog(self) -> bool:
+        dialog = tk.Toplevel(self.master)
+        dialog.title("Connection Settings")
+        dialog.transient(self.master)
+        dialog.resizable(False, False)
+        dialog.grab_set()
+        body = ttk.Frame(dialog, padding=16)
+        body.grid(sticky="nsew")
+        api_key = tk.StringVar(value=self.api_key_var.get())
+        base_url = tk.StringVar(value=self.base_url_var.get())
+        model = tk.StringVar(value=self.model_var.get())
+        saved = {"value": False}
+
+        def row(index: int, label: str, variable: tk.StringVar, *, masked: bool = False) -> None:
+            ttk.Label(body, text=label).grid(row=index, column=0, sticky="w", pady=5)
+            ttk.Entry(body, textvariable=variable, width=46, show="*" if masked else "").grid(row=index, column=1, sticky="ew", padx=(10, 0), pady=5)
+
+        def save() -> None:
+            if not api_key.get().strip() or not base_url.get().strip() or not model.get().strip():
+                messagebox.showerror("Missing connection value", "API key, Base URL, and Model are all required.", parent=dialog)
+                return
+            self.api_key_var.set(api_key.get().strip())
+            self.base_url_var.set(base_url.get().strip())
+            self.model_var.set(model.get().strip())
+            self.connection_status_var.set("Configured")
+            saved["value"] = True
+            dialog.destroy()
+
+        row(0, "API key", api_key, masked=True)
+        row(1, "Base URL", base_url)
+        row(2, "Model", model)
+        ttk.Label(body, text="Stored only in this GUI process; never written to trace files.", style="Hint.TLabel").grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 12))
+        actions = ttk.Frame(body)
+        actions.grid(row=4, column=0, columnspan=2, sticky="e")
+        ttk.Button(actions, text="Cancel", command=dialog.destroy).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(actions, text="Save", command=save, style="Accent.TButton").grid(row=0, column=1)
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        dialog.wait_window()
+        return saved["value"]
+
     def _read_config(self) -> GuiRunConfig | None:
         task = self.task_box.get("1.0", tk.END).strip()
         if not task:
@@ -135,9 +178,10 @@ class PineGui(ttk.Frame):
         if not workspace.is_dir():
             messagebox.showerror("Invalid workspace", f"Workspace is not a directory:\n{workspace}")
             return None
+        if not self.api_key_var.get().strip() and not self._open_connection_dialog():
+            return None
         api_key = self.api_key_var.get().strip()
         if not api_key:
-            messagebox.showerror("Missing API key", "Enter an API key. It is held only in this process and is not written to the trace.")
             return None
         return GuiRunConfig(task, workspace, api_key, self.base_url_var.get().strip(), self.model_var.get().strip(), max_turns, max_seconds, Path(self.trace_var.get()).expanduser(), self.approve_var.get())
 
