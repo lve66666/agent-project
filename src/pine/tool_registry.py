@@ -9,6 +9,7 @@ from typing import Any, Callable
 from .command_runner import CommandRunner
 from .protocol import ToolCall, ToolResult
 from .workspace import Workspace
+from .search import search_text
 
 
 @dataclass(frozen=True)
@@ -77,11 +78,15 @@ def build_default_registry(workspace: Workspace, runner: CommandRunner) -> ToolR
         result = runner.run(command, cwd, timeout_seconds)
         return json.dumps({"approved": result.approved, "returncode": result.returncode, "timed_out": result.timed_out, "truncated": result.truncated, "output": result.output}, ensure_ascii=False)
 
+    def search_workspace(query: str, path: str = ".", max_results: int = 50, use_regex: bool = False) -> str:
+        return search_text(workspace, query, path, max_results, use_regex)
+
     return ToolRegistry([
         ToolDefinition("list_files", "List files below a directory in the workspace.", _object_schema({"path": {"type": "string"}, "depth": {"type": "integer"}}), frozenset(), {"path": str, "depth": int}, list_files),
         ToolDefinition("read_file", "Read a UTF-8 text file with line numbers.", _object_schema({"path": {"type": "string"}, "start_line": {"type": "integer"}, "end_line": {"type": "integer"}}, ["path"]), frozenset({"path"}), {"path": str, "start_line": int, "end_line": int}, read_file),
         ToolDefinition("write_file", "Atomically write UTF-8 text to a workspace file.", _object_schema({"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]), frozenset({"path", "content"}), {"path": str, "content": str}, write_file),
         ToolDefinition("run_command", "Run a shell command in the workspace with a time limit.", _object_schema({"command": {"type": "string"}, "cwd": {"type": "string"}, "timeout_seconds": {"type": "integer"}}, ["command"]), frozenset({"command"}), {"command": str, "cwd": str, "timeout_seconds": int}, run_command),
+        ToolDefinition("search_text", "Search workspace UTF-8 source files by literal text or regular expression.", _object_schema({"query": {"type": "string"}, "path": {"type": "string"}, "max_results": {"type": "integer"}, "use_regex": {"type": "boolean"}}, ["query"]), frozenset({"query"}), {"query": str, "path": str, "max_results": int, "use_regex": bool}, search_workspace),
     ])
 
 

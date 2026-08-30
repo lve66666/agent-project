@@ -31,12 +31,13 @@
 
 ## 工具边界
 
-第一版只提供四个工具：
+当前提供五个工具：
 
 - `list_files(path, depth)`：遍历工作区内的文本目录，跳过被忽略目录与超深路径。
 - `read_file(path, start_line, end_line)`：读取 UTF-8 文本，返回行号并限制字节数。
 - `write_file(path, content)`：仅写工作区普通文件，先创建父目录，再原子替换；不写二进制。
 - `run_command(command, cwd, timeout_seconds)`：在工作区内运行；默认先征得交互确认，`--yes` 只用于演示；强制超时和输出上限。
+- `search_text(query, path, max_results, use_regex)`：搜索工作区内 UTF-8 文本，跳过受保护目录、二进制和超大文件，并限制结果数量。
 
 不在初版实现“任意 Python 执行”或远程文件服务。此取舍让安全策略、失败行为和面试讲解都保持清楚，同时足以完成真实的编辑-测试-修复任务。
 
