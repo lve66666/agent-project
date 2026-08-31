@@ -2,7 +2,7 @@
 
 ## Plan Mode
 
-Use **Plan Task** when a task should be reviewed before any local work begins. Pine sends a separate planning request with an empty tool list, so that stage cannot read files, write files, or run commands. The resulting plan opens in an editable review dialog. Select **Reject Plan** to stop without execution, or edit the text and select **Execute Approved Plan** to start the normal bounded `AgentLoop`.
+Use **Plan Task** when a task should be reviewed before any local changes begin. Pine first runs a separate, bounded planning loop with only `list_files`, `search_text`, and `read_file`; it cannot write files or run commands. The resulting plan opens in an editable review dialog. Select **Reject Plan** to stop without execution, or edit the text and select **Execute Approved Plan** to start the normal bounded `AgentLoop`.
 
 The trace for a planned run records `plan_requested`, `plan_created`, and either `plan_approved` or `plan_rejected`. Approval does not bypass workspace boundaries or command confirmation: those policies still apply to every tool call during execution.
 

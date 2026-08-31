@@ -90,6 +90,24 @@ def build_default_registry(workspace: Workspace, runner: CommandRunner) -> ToolR
     ])
 
 
+def build_read_only_registry(workspace: Workspace) -> ToolRegistry:
+    """Expose project-inspection tools only; no mutation or shell execution."""
+    def list_files(path: str = ".", depth: int = 2) -> str:
+        return workspace.list_files(path, depth)
+
+    def read_file(path: str, start_line: int = 1, end_line: int | None = None) -> str:
+        return workspace.read_file(path, start_line, end_line)
+
+    def search_workspace(query: str, path: str = ".", max_results: int = 50, use_regex: bool = False) -> str:
+        return search_text(workspace, query, path, max_results, use_regex)
+
+    return ToolRegistry([
+        ToolDefinition("list_files", "List files below a directory in the workspace.", _object_schema({"path": {"type": "string"}, "depth": {"type": "integer"}}), frozenset(), {"path": str, "depth": int}, list_files),
+        ToolDefinition("read_file", "Read a UTF-8 text file with line numbers.", _object_schema({"path": {"type": "string"}, "start_line": {"type": "integer"}, "end_line": {"type": "integer"}}, ["path"]), frozenset({"path"}), {"path": str, "start_line": int, "end_line": int}, read_file),
+        ToolDefinition("search_text", "Search workspace UTF-8 source files by literal text or regular expression.", _object_schema({"query": {"type": "string"}, "path": {"type": "string"}, "max_results": {"type": "integer"}, "use_regex": {"type": "boolean"}}, ["query"]), frozenset({"query"}), {"query": str, "path": str, "max_results": int, "use_regex": bool}, search_workspace),
+    ])
+
+
 def _object_schema(properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
     schema: dict[str, Any] = {"type": "object", "properties": properties, "additionalProperties": False}
     if required:

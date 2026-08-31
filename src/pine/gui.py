@@ -15,7 +15,7 @@ from .agent_loop import AgentLoop
 from .command_runner import CommandRunner
 from .config import ConfigurationError, load_settings
 from .model_client import ModelError, OpenAICompatibleClient
-from .planning import draft_plan
+from .planning import run_read_only_plan
 from .tool_registry import build_default_registry
 from .trace import TraceWriter
 from .workspace import Workspace, WorkspaceError
@@ -213,7 +213,7 @@ class PineGui(ttk.Frame):
         self.stop_button.configure(state="normal")
         self.status_var.set("Drafting plan")
         self._clear_log()
-        self._append("Planning started. Planning mode has no tools and cannot change files or run commands.\n")
+        self._append("Planning started. Planning mode can inspect files but cannot change files or run commands.\n")
         threading.Thread(target=self._draft_plan, args=(config,), daemon=True).start()
 
     def _draft_plan(self, config: GuiRunConfig) -> None:
@@ -223,15 +223,27 @@ class PineGui(ttk.Frame):
             trace.record("run_started", task=config.task, workspace=str(config.workspace), model=config.model, mode="plan")
             trace.record("plan_requested", task=config.task)
             client = OpenAICompatibleClient(api_key=config.api_key, base_url=config.base_url, model=config.model)
-            plan = draft_plan(client, config.task)
-            if self.cancelled.is_set():
+            result = run_read_only_plan(
+                client,
+                Workspace(config.workspace),
+                config.task,
+                max_turns=config.max_turns,
+                max_seconds=config.max_seconds,
+                cancelled=self.cancelled,
+                trace=trace,
+                on_event=self._on_planning_event,
+            )
+            if result.reason.value == "cancelled":
                 trace.record("plan_cancelled")
-                trace.record("run_finished", reason="cancelled", turns=0)
                 self.events.put(("plan_cancelled", {"trace": trace.path}))
                 return
-            trace.record("plan_created", plan=plan)
-            self.events.put(("plan_ready", {"config": config, "plan": plan, "trace": trace}))
-        except (ModelError, OSError, ValueError) as error:
+            if result.reason.value != "completed":
+                trace.record("plan_failed", reason=result.reason.value, summary=result.summary)
+                self.events.put(("plan_failed", {"reason": result.reason.value, "summary": result.summary, "trace": trace.path}))
+                return
+            trace.record("plan_created", plan=result.summary, turns=result.turns, tool_calls=len(result.tool_results))
+            self.events.put(("plan_ready", {"config": config, "plan": result.summary, "trace": trace}))
+        except (ModelError, WorkspaceError, OSError, ValueError) as error:
             self.events.put(("fatal", {"error": str(error)}))
 
     def _run_agent(self, config: GuiRunConfig, task: str | None = None, trace: TraceWriter | None = None) -> None:
@@ -261,6 +273,9 @@ class PineGui(ttk.Frame):
     def _on_agent_event(self, event: str, payload: dict[str, Any]) -> None:
         self.events.put(("agent", {"event": event, **payload}))
 
+    def _on_planning_event(self, event: str, payload: dict[str, Any]) -> None:
+        self.events.put(("agent", {"event": event, "phase": "plan", **payload}))
+
     def _confirm_command(self, command: str) -> bool:
         reply: queue.Queue[bool] = queue.Queue(maxsize=1)
         self.events.put(("confirm", {"command": command, "reply": reply}))
@@ -288,6 +303,10 @@ class PineGui(ttk.Frame):
                 elif kind == "plan_cancelled":
                     self._append(f"Planning cancelled. Trace: {payload['trace']}\n")
                     self._finish_run("cancelled")
+                elif kind == "plan_failed":
+                    self._append(f"Planning stopped: {payload['reason']}. {payload['summary']}\n")
+                    self._append(f"Trace: {payload['trace']}\n")
+                    self._finish_run(payload["reason"])
                 elif kind == "result":
                     result = payload["result"]
                     self._append(f"\nResult: {result.summary}\n")
@@ -302,10 +321,9 @@ class PineGui(ttk.Frame):
         self.after(100, self._drain_events)
 
     def _show_plan_review(self, config: GuiRunConfig, plan: str, trace: TraceWriter) -> None:
-        """Let the user edit the tool-free plan before the execution loop is started."""
+        """Let the user edit a read-only plan before the execution loop is started."""
         if self.cancelled.is_set():
             trace.record("plan_cancelled")
-            trace.record("run_finished", reason="cancelled", turns=0)
             self._finish_run("cancelled")
             return
         dialog = tk.Toplevel(self.master)
@@ -321,7 +339,7 @@ class PineGui(ttk.Frame):
         body.columnconfigure(0, weight=1)
         body.rowconfigure(2, weight=1)
         ttk.Label(body, text="Proposed plan", style="Section.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(body, text="Review or edit this plan. No files or commands have been executed yet.", style="Hint.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 8))
+        ttk.Label(body, text="The plan may inspect files, but has not changed files or run commands.", style="Hint.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 8))
         plan_box = scrolledtext.ScrolledText(body, wrap=tk.WORD, font=("Consolas", 10), relief="solid", borderwidth=1)
         plan_box.grid(row=2, column=0, sticky="nsew")
         plan_box.insert("1.0", plan)
@@ -330,7 +348,6 @@ class PineGui(ttk.Frame):
 
         def cancel() -> None:
             trace.record("plan_rejected")
-            trace.record("run_finished", reason="plan_rejected", turns=0)
             dialog.destroy()
             self._append(f"Plan rejected. No files were changed and no commands were run. Trace: {trace.path}\n")
             self._finish_run("plan rejected")
@@ -359,17 +376,18 @@ class PineGui(ttk.Frame):
 
     def _render_agent_event(self, event: dict[str, Any]) -> None:
         name = event["event"]
+        label = "Plan" if event.get("phase") == "plan" else "Turn"
         if name == "model_request":
-            self._append(f"[Turn {event['turn']}] Requesting model with {event['message_count']} messages.\n")
+            self._append(f"[{label} {event['turn']}] Requesting model with {event['message_count']} messages.\n")
         elif name == "assistant_reply":
             tools = event["tools"]
-            self._append(f"[Turn {event['turn']}] Model requested: {', '.join(tools) if tools else 'final response'}.\n")
+            self._append(f"[{label} {event['turn']}] Model requested: {', '.join(tools) if tools else 'final response'}.\n")
         elif name == "tool_result":
             state = "ok" if event["ok"] else "failed"
             preview = str(event["content"]).replace("\n", " ")[:180]
-            self._append(f"[Turn {event['turn']}] {event['tool']}: {state}. {preview}\n")
+            self._append(f"[{label} {event['turn']}] {event['tool']}: {state}. {preview}\n")
         elif name in {"model_error", "protocol_error"}:
-            self._append(f"[Turn {event['turn']}] {name}: {event['error']}\n")
+            self._append(f"[{label} {event['turn']}] {name}: {event['error']}\n")
         elif name == "run_finished":
             self._append(f"Run finished: {event['reason']} after {event['turns']} turn(s).\n")
 
