@@ -98,16 +98,3 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(reply.content, "ok")
         with self.assertRaises(ModelProtocolError):
             parse_chat_completion({"choices": []})
-
-    def test_optional_memory_is_injected_after_current_task(self) -> None:
-        model = FakeModel([AssistantReply("done")])
-        result = AgentLoop(
-            model,
-            self.registry,
-            max_turns=1,
-            max_seconds=30,
-            memory=[{"role": "system", "content": "Prior task summary"}],
-        ).run("current task")
-        self.assertEqual(result.reason, StopReason.COMPLETED)
-        self.assertEqual([message["role"] for message in model.requests[0][0]], ["system", "user", "system"])
-        self.assertEqual(model.requests[0][0][2]["content"], "Prior task summary")

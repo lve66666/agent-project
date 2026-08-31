@@ -5,7 +5,6 @@
 config.local.toml
 data/
 runs/
-sessions/
 __pycache__/
 *.py[cod]
 .pytest_cache/

@@ -21,7 +21,7 @@ Do not claim the task is complete. The user must approve or edit your plan befor
 EventCallback = Callable[[str, dict[str, Any]], None]
 
 
-def run_read_only_plan(client: ModelClient, workspace: Workspace, task: str, *, max_turns: int, max_seconds: int, cancelled: Event | None = None, trace: TraceWriter | None = None, on_event: EventCallback | None = None, memory: list[dict[str, str]] | None = None) -> RunResult:
+def run_read_only_plan(client: ModelClient, workspace: Workspace, task: str, *, max_turns: int, max_seconds: int, cancelled: Event | None = None, trace: TraceWriter | None = None, on_event: EventCallback | None = None) -> RunResult:
     """Explore through read-only tools, then return the model's final plan text."""
     planner = AgentLoop(
         client,
@@ -32,6 +32,5 @@ def run_read_only_plan(client: ModelClient, workspace: Workspace, task: str, *, 
         trace=trace,
         on_event=on_event,
         system_prompt=PLANNING_SYSTEM_PROMPT,
-        memory=memory,
     )
     return planner.run(task)

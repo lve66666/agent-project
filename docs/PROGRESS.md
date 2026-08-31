@@ -4,8 +4,6 @@
 
 Plan Mode is implemented in the desktop GUI. It explores through read-only file tools before presenting an editable plan; write and command tools remain unavailable until approval. Both approval and rejection are traceable. Offline verification: 27 unit tests passed, with one symbolic-link test skipped because of Windows permissions.
 
-Session memory is implemented in the GUI with workspace isolation, bounded redacted summaries, opt-in injection, and a clear-history action. Offline verification now includes 31 passing tests.
-
 最后更新：2026-08-27
 
 ## 当前状态
