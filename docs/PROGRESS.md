@@ -1,5 +1,9 @@
 # 实时进度
 
+## Latest Update
+
+Plan Mode is implemented in the desktop GUI. Its planning request is tool-free, its plan is editable before execution, and both approval and rejection are traceable. Offline verification: 27 unit tests passed, with one symbolic-link test skipped because of Windows permissions.
+
 最后更新：2026-08-27
 
 ## 当前状态

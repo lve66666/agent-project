@@ -14,7 +14,8 @@ from typing import Any
 from .agent_loop import AgentLoop
 from .command_runner import CommandRunner
 from .config import ConfigurationError, load_settings
-from .model_client import OpenAICompatibleClient
+from .model_client import ModelError, OpenAICompatibleClient
+from .planning import draft_plan
 from .tool_registry import build_default_registry
 from .trace import TraceWriter
 from .workspace import Workspace, WorkspaceError
@@ -95,12 +96,14 @@ class PineGui(ttk.Frame):
         self.task_box.insert("1.0", "Read the relevant files, implement the requested change, run tests, and report the verification result.")
         controls = ttk.Frame(content)
         controls.grid(row=2, column=0, sticky="ew", pady=(0, 10))
-        controls.columnconfigure(2, weight=1)
+        controls.columnconfigure(3, weight=1)
+        self.plan_button = ttk.Button(controls, text="Plan Task", command=self._start_plan)
+        self.plan_button.grid(row=0, column=0, sticky="w")
         self.run_button = ttk.Button(controls, text="Run Task", command=self._start_run, style="Accent.TButton")
-        self.run_button.grid(row=0, column=0, sticky="w")
+        self.run_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
         self.stop_button = ttk.Button(controls, text="Stop", command=self._stop_run, state="disabled")
-        self.stop_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
-        ttk.Label(controls, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=2, sticky="e")
+        self.stop_button.grid(row=0, column=2, sticky="w", padx=(8, 0))
+        ttk.Label(controls, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=3, sticky="e")
         ttk.Label(content, text="Execution", style="Section.TLabel").grid(row=3, column=0, sticky="w")
         self.log_box = scrolledtext.ScrolledText(content, wrap=tk.WORD, font=("Consolas", 10), state="disabled", relief="solid", borderwidth=1)
         self.log_box.grid(row=4, column=0, sticky="nsew", pady=(6, 0))
@@ -192,13 +195,46 @@ class PineGui(ttk.Frame):
         self.running = True
         self.cancelled.clear()
         self.run_button.configure(state="disabled")
+        self.plan_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.status_var.set("Running")
         self._clear_log()
         self._append("Run started. The API key is never displayed or logged.\n")
         threading.Thread(target=self._run_agent, args=(config,), daemon=True).start()
 
-    def _run_agent(self, config: GuiRunConfig) -> None:
+    def _start_plan(self) -> None:
+        config = self._read_config()
+        if not config:
+            return
+        self.running = True
+        self.cancelled.clear()
+        self.run_button.configure(state="disabled")
+        self.plan_button.configure(state="disabled")
+        self.stop_button.configure(state="normal")
+        self.status_var.set("Drafting plan")
+        self._clear_log()
+        self._append("Planning started. Planning mode has no tools and cannot change files or run commands.\n")
+        threading.Thread(target=self._draft_plan, args=(config,), daemon=True).start()
+
+    def _draft_plan(self, config: GuiRunConfig) -> None:
+        trace: TraceWriter | None = None
+        try:
+            trace = TraceWriter(config.trace_dir)
+            trace.record("run_started", task=config.task, workspace=str(config.workspace), model=config.model, mode="plan")
+            trace.record("plan_requested", task=config.task)
+            client = OpenAICompatibleClient(api_key=config.api_key, base_url=config.base_url, model=config.model)
+            plan = draft_plan(client, config.task)
+            if self.cancelled.is_set():
+                trace.record("plan_cancelled")
+                trace.record("run_finished", reason="cancelled", turns=0)
+                self.events.put(("plan_cancelled", {"trace": trace.path}))
+                return
+            trace.record("plan_created", plan=plan)
+            self.events.put(("plan_ready", {"config": config, "plan": plan, "trace": trace}))
+        except (ModelError, OSError, ValueError) as error:
+            self.events.put(("fatal", {"error": str(error)}))
+
+    def _run_agent(self, config: GuiRunConfig, task: str | None = None, trace: TraceWriter | None = None) -> None:
         try:
             previous = {name: os.environ.get(name) for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL")}
             os.environ["OPENAI_API_KEY"] = config.api_key
@@ -207,10 +243,11 @@ class PineGui(ttk.Frame):
             settings = load_settings(max_turns=config.max_turns, max_seconds=config.max_seconds)
             workspace = Workspace(config.workspace)
             runner = CommandRunner(workspace, approve_all=config.approve_all, confirmer=self._confirm_command)
-            trace = TraceWriter(config.trace_dir)
-            trace.record("run_started", task=config.task, workspace=str(config.workspace), model=settings.model)
+            active_task = task or config.task
+            trace = trace or TraceWriter(config.trace_dir)
+            trace.record("execution_started" if task else "run_started", task=active_task, workspace=str(config.workspace), model=settings.model)
             client = OpenAICompatibleClient(api_key=settings.api_key, base_url=settings.base_url, model=settings.model)
-            result = AgentLoop(client, build_default_registry(workspace, runner), max_turns=settings.max_turns, max_seconds=settings.max_seconds, cancelled=self.cancelled, trace=trace, on_event=self._on_agent_event).run(config.task)
+            result = AgentLoop(client, build_default_registry(workspace, runner), max_turns=settings.max_turns, max_seconds=settings.max_seconds, cancelled=self.cancelled, trace=trace, on_event=self._on_agent_event).run(active_task)
             self.events.put(("result", {"result": result, "trace": trace.path}))
         except (ConfigurationError, WorkspaceError, OSError, ValueError) as error:
             self.events.put(("fatal", {"error": str(error)}))
@@ -246,6 +283,11 @@ class PineGui(ttk.Frame):
                     payload["reply"].put(allowed)
                 elif kind == "agent":
                     self._render_agent_event(payload)
+                elif kind == "plan_ready":
+                    self._show_plan_review(payload["config"], payload["plan"], payload["trace"])
+                elif kind == "plan_cancelled":
+                    self._append(f"Planning cancelled. Trace: {payload['trace']}\n")
+                    self._finish_run("cancelled")
                 elif kind == "result":
                     result = payload["result"]
                     self._append(f"\nResult: {result.summary}\n")
@@ -258,6 +300,62 @@ class PineGui(ttk.Frame):
         except queue.Empty:
             pass
         self.after(100, self._drain_events)
+
+    def _show_plan_review(self, config: GuiRunConfig, plan: str, trace: TraceWriter) -> None:
+        """Let the user edit the tool-free plan before the execution loop is started."""
+        if self.cancelled.is_set():
+            trace.record("plan_cancelled")
+            trace.record("run_finished", reason="cancelled", turns=0)
+            self._finish_run("cancelled")
+            return
+        dialog = tk.Toplevel(self.master)
+        dialog.title("Review Plan")
+        dialog.transient(self.master)
+        dialog.geometry("760x560")
+        dialog.minsize(600, 420)
+        dialog.grab_set()
+        body = ttk.Frame(dialog, padding=16)
+        body.grid(sticky="nsew")
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(2, weight=1)
+        ttk.Label(body, text="Proposed plan", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(body, text="Review or edit this plan. No files or commands have been executed yet.", style="Hint.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 8))
+        plan_box = scrolledtext.ScrolledText(body, wrap=tk.WORD, font=("Consolas", 10), relief="solid", borderwidth=1)
+        plan_box.grid(row=2, column=0, sticky="nsew")
+        plan_box.insert("1.0", plan)
+        actions = ttk.Frame(body)
+        actions.grid(row=3, column=0, sticky="e", pady=(12, 0))
+
+        def cancel() -> None:
+            trace.record("plan_rejected")
+            trace.record("run_finished", reason="plan_rejected", turns=0)
+            dialog.destroy()
+            self._append(f"Plan rejected. No files were changed and no commands were run. Trace: {trace.path}\n")
+            self._finish_run("plan rejected")
+
+        def execute() -> None:
+            approved_plan = plan_box.get("1.0", tk.END).strip()
+            if not approved_plan:
+                messagebox.showerror("Missing plan", "Keep or enter a plan before execution.", parent=dialog)
+                return
+            trace.record("plan_approved", plan=approved_plan)
+            dialog.destroy()
+            execution_task = (
+                f"Original user task:\n{config.task}\n\n"
+                f"User-approved implementation plan:\n{approved_plan}\n\n"
+                "Execute the task within the selected workspace. Treat the approved plan as guidance; "
+                "inspect the actual files, preserve existing behavior unless the task requires a change, "
+                "and verify the result with appropriate tests."
+            )
+            self.status_var.set("Executing approved plan")
+            self._append("Plan approved. Starting tool-enabled execution.\n")
+            threading.Thread(target=self._run_agent, args=(config, execution_task, trace), daemon=True).start()
+
+        ttk.Button(actions, text="Reject Plan", command=cancel).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(actions, text="Execute Approved Plan", command=execute, style="Accent.TButton").grid(row=0, column=1)
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
 
     def _render_agent_event(self, event: dict[str, Any]) -> None:
         name = event["event"]
@@ -278,6 +376,7 @@ class PineGui(ttk.Frame):
     def _finish_run(self, reason: str) -> None:
         self.running = False
         self.run_button.configure(state="normal")
+        self.plan_button.configure(state="normal")
         self.stop_button.configure(state="disabled")
         self.status_var.set(f"Finished: {reason}")
 

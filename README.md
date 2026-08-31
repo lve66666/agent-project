@@ -1,5 +1,11 @@
 # Pine Agent
 
+## Plan Mode
+
+Use **Plan Task** when a task should be reviewed before any local work begins. Pine sends a separate planning request with an empty tool list, so that stage cannot read files, write files, or run commands. The resulting plan opens in an editable review dialog. Select **Reject Plan** to stop without execution, or edit the text and select **Execute Approved Plan** to start the normal bounded `AgentLoop`.
+
+The trace for a planned run records `plan_requested`, `plan_created`, and either `plan_approved` or `plan_rejected`. Approval does not bypass workspace boundaries or command confirmation: those policies still apply to every tool call during execution.
+
 一个从零实现的命令行编程智能体。它调用兼容 OpenAI 工具调用协议的模型，但由本项目自行管理上下文、工具执行、循环、错误和审计记录；不使用任何 Agent 框架或托管代码/文件工具。
 
 项目尚处于设计阶段。开发顺序、验收条件和当前状态见 [docs/PROGRESS.md](docs/PROGRESS.md)；设计理由见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。

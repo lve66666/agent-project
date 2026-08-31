@@ -1,5 +1,11 @@
 # 设计与运行机制
 
+## Plan And Execute Mode
+
+`planning.py` is a separate pre-execution stage. It sends the original task to the same model client with `tools=[]` and rejects a response that contains tool calls or no plan text. Therefore plan generation cannot use the local file, search, write, or command tools. The GUI presents this text in an editable modal. Only an explicit user approval starts `AgentLoop`; rejecting the dialog makes no workspace changes.
+
+The approved plan is included with the original task as execution guidance, not as a new authorization mechanism. Tool schemas, workspace confinement, command confirmation, turn limits, time limits, context trimming, and error handling remain owned by the existing local execution loop. One JSONL trace records the planned-run lifecycle: `plan_requested`, `plan_created`, then `plan_approved` plus execution events, or `plan_rejected` with no execution events.
+
 ## 一次任务如何运行
 
 ```text
