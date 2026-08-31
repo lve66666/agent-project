@@ -6,6 +6,8 @@
 
 The approved plan is included with the original task as execution guidance, not as a new authorization mechanism. Tool schemas, workspace confinement, command confirmation, turn limits, time limits, context trimming, and error handling remain owned by the existing local execution loop. One JSONL trace records the planned-run lifecycle: `plan_requested`, `plan_created`, then `plan_approved` plus execution events, or `plan_rejected` with no execution events.
 
+`session.py` is deliberately separate from trace. It stores at most 20 redacted task summaries per workspace hash and can inject at most 8,000 characters into a later AgentLoop. It never restores full tool messages, so persisted memory cannot break assistant/tool-call pairing. The GUI can disable injection or clear the selected workspace history.
+
 ## 一次任务如何运行
 
 ```text
