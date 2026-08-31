@@ -17,7 +17,7 @@ EventCallback = Callable[[str, dict[str, Any]], None]
 
 
 class AgentLoop:
-    def __init__(self, client: ModelClient, tools: ToolRegistry, *, max_turns: int, max_seconds: int, cancelled: Event | None = None, context: ContextWindow | None = None, trace: TraceWriter | None = None, on_event: EventCallback | None = None, system_prompt: str = SYSTEM_PROMPT) -> None:
+    def __init__(self, client: ModelClient, tools: ToolRegistry, *, max_turns: int, max_seconds: int, cancelled: Event | None = None, context: ContextWindow | None = None, trace: TraceWriter | None = None, on_event: EventCallback | None = None, system_prompt: str = SYSTEM_PROMPT, memory: list[Message] | tuple[Message, ...] | None = None) -> None:
         self.client = client
         self.tools = tools
         self.max_turns = max_turns
@@ -27,13 +27,14 @@ class AgentLoop:
         self.trace = trace
         self.on_event = on_event
         self.system_prompt = system_prompt
+        self.memory = tuple(dict(message) for message in (memory or ()))
 
     def _emit(self, event: str, **payload: Any) -> None:
         if self.on_event:
             self.on_event(event, payload)
 
     def run(self, task: str) -> RunResult:
-        messages: list[Message] = [{"role": "system", "content": self.system_prompt}, {"role": "user", "content": task}]
+        messages: list[Message] = [{"role": "system", "content": self.system_prompt}, {"role": "user", "content": task}, *self.memory]
         results: list[ToolResult] = []
         deadline = time.monotonic() + self.max_seconds
         for turn in range(1, self.max_turns + 1):

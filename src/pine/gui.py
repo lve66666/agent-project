@@ -16,6 +16,7 @@ from .command_runner import CommandRunner
 from .config import ConfigurationError, load_settings
 from .model_client import ModelError, OpenAICompatibleClient
 from .planning import run_read_only_plan
+from .session import SessionStore
 from .tool_registry import build_default_registry
 from .trace import TraceWriter
 from .workspace import Workspace, WorkspaceError
@@ -32,6 +33,7 @@ class GuiRunConfig:
     max_seconds: int
     trace_dir: Path
     approve_all: bool
+    use_memory: bool
 
 
 class PineGui(ttk.Frame):
@@ -45,6 +47,7 @@ class PineGui(ttk.Frame):
         self.running = False
         self._build_variables()
         self._build_layout()
+        self._refresh_history(Path(self.workspace_var.get()).expanduser())
         self.after(100, self._drain_events)
 
     def _build_variables(self) -> None:
@@ -57,6 +60,8 @@ class PineGui(ttk.Frame):
         self.seconds_var = tk.StringVar(value="180")
         self.trace_var = tk.StringVar(value=str(root / "runs"))
         self.approve_var = tk.BooleanVar(value=False)
+        self.memory_var = tk.BooleanVar(value=True)
+        self.session_store = SessionStore(root / "sessions")
         self.status_var = tk.StringVar(value="Ready")
         self.connection_status_var = tk.StringVar(value="Configured" if self.api_key_var.get() else "Not configured")
 
@@ -85,11 +90,14 @@ class PineGui(ttk.Frame):
         self._setting_row(settings, 5, "Trace directory", self.trace_var, self._choose_trace_dir)
         ttk.Checkbutton(settings, text="Auto-approve commands", variable=self.approve_var).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
         ttk.Label(settings, text="Without auto-approve, every command opens a confirmation dialog.", wraplength=270, style="Hint.TLabel").grid(row=7, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(settings, text="Use project memory", variable=self.memory_var).grid(row=8, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Button(settings, text="Clear History", command=self._clear_history).grid(row=9, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        ttk.Label(settings, text="Only bounded task summaries are stored; full tool history is not restored.", wraplength=270, style="Hint.TLabel").grid(row=10, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
         content = ttk.Frame(self)
         content.grid(row=1, column=1, sticky="nsew", pady=(14, 0))
         content.columnconfigure(0, weight=1)
-        content.rowconfigure(2, weight=1)
+        content.rowconfigure(6, weight=1)
         ttk.Label(content, text="Task", style="Section.TLabel").grid(row=0, column=0, sticky="w")
         self.task_box = scrolledtext.ScrolledText(content, height=7, wrap=tk.WORD, font=("Consolas", 11), relief="solid", borderwidth=1)
         self.task_box.grid(row=1, column=0, sticky="ew", pady=(6, 10))
@@ -104,10 +112,12 @@ class PineGui(ttk.Frame):
         self.stop_button = ttk.Button(controls, text="Stop", command=self._stop_run, state="disabled")
         self.stop_button.grid(row=0, column=2, sticky="w", padx=(8, 0))
         ttk.Label(controls, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=3, sticky="e")
-        ttk.Label(content, text="Execution", style="Section.TLabel").grid(row=3, column=0, sticky="w")
+        ttk.Label(content, text="Chat History", style="Section.TLabel").grid(row=3, column=0, sticky="w")
+        self.history_box = scrolledtext.ScrolledText(content, height=6, wrap=tk.WORD, font=("Consolas", 9), state="disabled", relief="solid", borderwidth=1)
+        self.history_box.grid(row=4, column=0, sticky="ew", pady=(6, 10))
+        ttk.Label(content, text="Execution", style="Section.TLabel").grid(row=5, column=0, sticky="w")
         self.log_box = scrolledtext.ScrolledText(content, wrap=tk.WORD, font=("Consolas", 10), state="disabled", relief="solid", borderwidth=1)
-        self.log_box.grid(row=4, column=0, sticky="nsew", pady=(6, 0))
-        content.rowconfigure(4, weight=1)
+        self.log_box.grid(row=6, column=0, sticky="nsew", pady=(6, 0))
 
     def _setting_row(self, parent: ttk.LabelFrame, row: int, label: str, variable: tk.StringVar, command=None, show: str | None = None) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4)
@@ -120,6 +130,7 @@ class PineGui(ttk.Frame):
         selected = filedialog.askdirectory(initialdir=self.workspace_var.get() or str(Path.cwd()))
         if selected:
             self.workspace_var.set(selected)
+            self._refresh_history(Path(selected))
 
     def _choose_trace_dir(self) -> None:
         selected = filedialog.askdirectory(initialdir=self.trace_var.get() or str(Path.cwd()))
@@ -186,7 +197,30 @@ class PineGui(ttk.Frame):
         api_key = self.api_key_var.get().strip()
         if not api_key:
             return None
-        return GuiRunConfig(task, workspace, api_key, self.base_url_var.get().strip(), self.model_var.get().strip(), max_turns, max_seconds, Path(self.trace_var.get()).expanduser(), self.approve_var.get())
+        self._refresh_history(workspace)
+        return GuiRunConfig(task, workspace, api_key, self.base_url_var.get().strip(), self.model_var.get().strip(), max_turns, max_seconds, Path(self.trace_var.get()).expanduser(), self.approve_var.get(), self.memory_var.get())
+
+    def _refresh_history(self, workspace: Path) -> None:
+        if not hasattr(self, "history_box") or not workspace.is_dir():
+            return
+        try:
+            content = self.session_store.display_text(workspace)
+        except OSError:
+            content = "Unable to read project memory."
+        self.history_box.configure(state="normal")
+        self.history_box.delete("1.0", tk.END)
+        self.history_box.insert("1.0", content)
+        self.history_box.configure(state="disabled")
+
+    def _clear_history(self) -> None:
+        workspace = Path(self.workspace_var.get()).expanduser().resolve()
+        if not workspace.is_dir():
+            messagebox.showerror("Invalid workspace", f"Workspace is not a directory:\n{workspace}")
+            return
+        if messagebox.askyesno("Clear project memory?", "Delete saved task summaries for this workspace?", parent=self.master):
+            self.session_store.clear(workspace)
+            self._refresh_history(workspace)
+            self._append("Project memory cleared.\n")
 
     def _start_run(self) -> None:
         config = self._read_config()
@@ -232,6 +266,7 @@ class PineGui(ttk.Frame):
                 cancelled=self.cancelled,
                 trace=trace,
                 on_event=self._on_planning_event,
+                memory=self.session_store.memory_messages(config.workspace) if config.use_memory else None,
             )
             if result.reason.value == "cancelled":
                 trace.record("plan_cancelled")
@@ -259,8 +294,13 @@ class PineGui(ttk.Frame):
             trace = trace or TraceWriter(config.trace_dir)
             trace.record("execution_started" if task else "run_started", task=active_task, workspace=str(config.workspace), model=settings.model)
             client = OpenAICompatibleClient(api_key=settings.api_key, base_url=settings.base_url, model=settings.model)
-            result = AgentLoop(client, build_default_registry(workspace, runner), max_turns=settings.max_turns, max_seconds=settings.max_seconds, cancelled=self.cancelled, trace=trace, on_event=self._on_agent_event).run(active_task)
-            self.events.put(("result", {"result": result, "trace": trace.path}))
+            result = AgentLoop(client, build_default_registry(workspace, runner), max_turns=settings.max_turns, max_seconds=settings.max_seconds, cancelled=self.cancelled, trace=trace, on_event=self._on_agent_event, memory=self.session_store.memory_messages(config.workspace) if config.use_memory else None).run(active_task)
+            try:
+                session_path = self.session_store.record(config.workspace, task=config.task, summary=result.summary, reason=result.reason.value)
+                trace.record("session_recorded", path=str(session_path))
+            except (OSError, ValueError) as error:
+                trace.record("session_error", error=str(error))
+            self.events.put(("result", {"result": result, "trace": trace.path, "config": config}))
         except (ConfigurationError, WorkspaceError, OSError, ValueError) as error:
             self.events.put(("fatal", {"error": str(error)}))
         finally:
@@ -312,6 +352,7 @@ class PineGui(ttk.Frame):
                     self._append(f"\nResult: {result.summary}\n")
                     self._append(f"Stop reason: {result.reason.value}; turns: {result.turns}; tool calls: {len(result.tool_results)}\n")
                     self._append(f"Trace: {payload['trace']}\n")
+                    self._refresh_history(payload["config"].workspace)
                     self._finish_run(result.reason.value)
                 elif kind == "fatal":
                     self._append(f"\nError: {payload['error']}\n")
