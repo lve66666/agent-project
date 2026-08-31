@@ -1,37 +1,62 @@
 # Pine Agent
 
-## Plan Mode
+Pine Agent 是一个从零实现的本地 Coding Agent。它通过 OpenAI 兼容的 Chat Completions API 完成“检查代码、修改文件、运行测试、根据结果继续修复”的多轮任务。项目不使用 LangChain、LlamaIndex、OpenAI Agents SDK、AutoGen、CrewAI 或其他 Agent 框架，也不依赖服务端托管的代码执行和文件工具。
 
-Use **Plan Task** when a task should be reviewed before any local changes begin. Pine first runs a separate, bounded planning loop with only `list_files`, `search_text`, and `read_file`; it cannot write files or run commands. The resulting plan opens in an editable review dialog. Select **Reject Plan** to stop without execution, or edit the text and select **Execute Approved Plan** to start the normal bounded `AgentLoop`.
+## 已实现功能
 
-The trace for a planned run records `plan_requested`, `plan_created`, and either `plan_approved` or `plan_rejected`. Approval does not bypass workspace boundaries or command confirmation: those policies still apply to every tool call during execution.
+- **CLI**：从终端提交任务，限制最大轮数和总时间，并输出停止原因、轮数和工具调用数。
+- **桌面 GUI**：基于 Python 标准库 Tkinter，实时显示模型请求、工具调用、工具结果和错误；API 配置放在独立弹窗，主页不显示密钥。
+- **Plan Mode**：`Plan Task` 先运行只读规划阶段，只能列出、搜索和读取文件；用户可以编辑、批准或拒绝方案，批准后才进入可修改文件和运行命令的执行阶段。
+- **五个本地工具**：`list_files`、`search_text`、`read_file`、`write_file`、`run_command`。工具由本地注册表定义、校验参数并执行，模型不能直接访问文件系统或 shell。
+- **安全边界**：所有文件路径必须位于指定 workspace；拒绝 `..`、`.git`、符号链接逃逸、二进制和超大文件。命令默认弹窗确认，且有工作目录限制、超时和输出上限。
+- **可靠运行**：本地 `AgentLoop` 管理对话历史、工具结果回填、上下文预算、取消信号和终止条件。停止原因明确区分 `completed`、`max_turns`、`timeout`、`model_error`、`protocol_error` 和 `cancelled`。
+- **可审计 trace**：每次运行在 `runs/` 生成 JSONL 事件，包括请求、回复、工具调用、工具结果和最终原因；敏感字段和 API key 会脱敏。
 
-一个从零实现的命令行编程智能体。它调用兼容 OpenAI 工具调用协议的模型，但由本项目自行管理上下文、工具执行、循环、错误和审计记录；不使用任何 Agent 框架或托管代码/文件工具。
+## 环境要求
 
-项目尚处于设计阶段。开发顺序、验收条件和当前状态见 [docs/PROGRESS.md](docs/PROGRESS.md)；设计理由见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+Python 3.11+。运行时只使用标准库；模型服务需要一个 OpenAI 兼容接口。CLI 从环境变量读取连接信息：
 
-## 目标体验
+```powershell
+$env:OPENAI_API_KEY = "你的密钥"
+$env:OPENAI_BASE_URL = "https://api.openai.com/v1" # 可选
+$env:OPENAI_MODEL = "gpt-4.1-mini"                  # 可选
+```
 
-用户在目标项目目录执行 `pine "为 calculator.py 添加输入校验，并运行测试"`。Agent 搜索/读取仓库、提出或直接执行受允许的工具调用、查看测试结果并在有限轮次内给出结果和可复查的本地轨迹。
+密钥不会写入源码、README、Git、trace 或视频。GUI 中填写的密钥只保存在当前进程内，关闭程序即丢弃。
 
-## 约束
+## 运行
 
-- Python 3.11+，运行时仅使用标准库；命令行基于标准库 `argparse`。
-- API 凭据仅从环境变量读取；绝不写入日志、Git 或演示视频。
-- 文件工具限定在显式的 workspace 根目录；命令工具有超时、输出上限和确认策略。
-- 每次运行写入本地 JSONL 事件轨迹，包含模型请求摘要、工具请求、工具结果和终止原因。
+在仓库根目录执行：
 
-## 立即开始
+```powershell
+$env:PYTHONPATH = "src"
+python -m pine.cli "为 calculator.py 增加除零校验并运行测试" `
+  --workspace demo_project --max-turns 10 --max-seconds 180 --trace-dir runs --yes
+```
 
-按 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) 的 P0--P6 实施。每完成一个检查点，运行 `powershell -ExecutionPolicy Bypass -File tools/status.ps1` 查看计划、Git 和远端状态；再用 `tools/checkpoint.ps1` 创建小而可解释的提交。交付前运行 `tools/verify.ps1`。远端配置后检查点脚本才会推送，避免误推送。
-
-## Desktop GUI
-
-启动桌面界面：
+不使用 `--yes` 时，每个 `run_command` 都会询问 `Allow command ...? [y/N]`。启动 GUI：
 
 ```powershell
 $env:PYTHONPATH = "src"
 python -m pine.gui
 ```
 
-主页只显示任务与运行设置；在 “Connection Settings” 弹窗中填写 API key、Base URL 和模型名。API key 只保存在当前 GUI 进程，不会写入文件或 JSONL 轨迹。执行日志实时显示模型请求、工具调用和工具结果；关闭“Auto-approve commands”后，每条命令都会弹窗确认。
+也可以安装为本地命令：`python -m pip install -e .`，之后使用 `pine` 和 `pine-gui`。
+
+## 演示项目
+
+- `web_demo/`：成绩统计网页（HTML/CSS/JavaScript），可计算平均分、最高分和及格人数，并用 `node --test web_demo/test_app.js` 验证。
+- `grade_demo/`：Python 成绩统计模块，适合演示搜索逻辑、修复空列表异常和补充测试。
+- `demo_project/Fibonacci/`：斐波那契数、列表和求和任务，适合演示多轮修改与错误校验。
+
+运行离线测试：
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m unittest discover -s tests -v
+powershell -ExecutionPolicy Bypass -File tools/verify.ps1
+```
+
+## 设计重点
+
+模型只决定下一步建议；`AgentLoop`、工具参数校验、工作区权限、上下文裁剪、循环终止、错误处理和 trace 都由本项目自行编写。工具结果作为 `tool` 消息进入下一轮，因此模型能依据测试失败继续修复；达到本地轮数或时间预算时，循环强制停止。详细流程见 [流程.md](流程.md)，架构说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。

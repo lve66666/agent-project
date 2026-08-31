@@ -1,15 +1,16 @@
 仓库地址：https://github.com/lve66666/agent-project
 
-项目：Pine Agent，一个从零实现的命令行编程智能体。它通过 OpenAI 兼容模型 API 完成真实的“读文件、修改代码、运行测试、根据失败结果继续修复”任务。
+Pine Agent 是从零实现的本地 Coding Agent，通过 OpenAI 兼容 API 完成读代码、改文件、运行测试和根据失败结果继续修复。不使用 LangChain、LlamaIndex、OpenAI Agents SDK、AutoGen、CrewAI 等 Agent 框架，也不使用服务端代码执行或文件工具。
 
 运行（Python 3.11+）：
-1. 在 PowerShell 设置凭据：$env:OPENAI_API_KEY="你的密钥"；可选设置 OPENAI_BASE_URL、OPENAI_MODEL。
-2. 在仓库根目录执行：$env:PYTHONPATH="src"；运行 CLI：python -m pine.cli "为 calculator.py 增加除零校验并运行测试" --workspace demo_project --yes；或运行桌面界面：python -m pine.gui。
-3. 运行记录写入 runs/ 下的 JSONL 文件；使用 python -m unittest discover -s tests -v 运行离线测试。
+1. PowerShell 设置：$env:OPENAI_API_KEY="你的密钥"；可选设置 OPENAI_BASE_URL、OPENAI_MODEL。
+2. 根目录执行：$env:PYTHONPATH="src"；CLI 示例：python -m pine.cli "为 calculator.py 增加除零校验并运行测试" --workspace demo_project --yes；GUI：python -m pine.gui。
+3. 离线测试：python -m unittest discover -s tests -v。每次运行的 JSONL trace 在 runs/。
 
-特色与设计：
-- 不使用任何 Agent 框架或运行时第三方依赖；本地自行实现模型协议解析、工具注册与参数校验、循环终止、上下文裁剪、错误处理和 JSONL 审计。
-- 提供 list_files、search_text、read_file、write_file、run_command 五个工具。所有路径必须位于 workspace；搜索限制文本大小和结果数，命令有确认、超时和输出上限；GUI 的连接信息放在独立设置弹窗，实时显示每轮执行事件。
-- 模型只提出下一步建议，不能直接访问文件或 shell；本地状态机决定是否执行并在达到轮数/时间预算时停止。
+特色功能：
+- Plan Task 先只读查看文件，用户可编辑、批准或拒绝方案，批准后才允许修改和运行命令。
+- 自行实现 AgentLoop、上下文裁剪、协议解析、工具注册/参数校验、错误处理、循环终止和 JSONL 审计。
+- 五个本地工具：list_files、search_text、read_file、write_file、run_command。
+- workspace 路径隔离；命令有确认、超时和输出上限；trace 脱敏。GUI 实时显示多轮事件，API key 只在进程内保存。
 
-安全：密钥只从环境变量读取，不写入仓库、轨迹或视频。演示使用独立 demo_project 目录；提交截止后不再推送。
+演示项目：web_demo 成绩统计网页；grade_demo 成绩模块；demo_project/Fibonacci 斐波那契任务。
