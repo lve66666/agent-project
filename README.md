@@ -11,6 +11,7 @@ Pine Agent 是一个从零实现的本地 Coding Agent。它通过 OpenAI 兼容
 - **安全边界**：所有文件路径必须位于指定 workspace；拒绝 `..`、`.git`、符号链接逃逸、二进制和超大文件。命令默认弹窗确认，且有工作目录限制、超时和输出上限。
 - **可靠运行**：本地 `AgentLoop` 管理对话历史、工具结果回填、上下文预算、取消信号和终止条件。停止原因明确区分 `completed`、`max_turns`、`timeout`、`model_error`、`protocol_error` 和 `cancelled`。
 - **变更可确认**：`write_file` 返回 unified diff，GUI 实时展示修改前后的增删行；最终摘要列出修改文件、执行命令、测试状态和失败次数。
+- **修改审批**：GUI 在 `write_file` 或 `edit_file` 真正写入前弹出 Diff 预览；选择 `Reject Change` 时文件保持不变，批准后才执行原子写入。
 - **网络容错**：模型客户端对 408、429、425、5xx 和网络超时执行有限指数退避；401、403、404 和协议错误不会盲目重试。
 - **可审计 trace**：每次运行在 `runs/` 生成 JSONL 事件，包括请求、回复、工具调用、工具结果和最终原因；敏感字段和 API key 会脱敏。
 

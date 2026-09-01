@@ -49,7 +49,7 @@ The approved plan is included with the original task as execution guidance, not 
 - `run_command(command, cwd, timeout_seconds)`：在工作区内运行；默认先征得交互确认，`--yes` 只用于演示；强制超时和输出上限。
 - `search_text(query, path, max_results, use_regex)`：搜索工作区内 UTF-8 文本，跳过受保护目录、二进制和超大文件，并限制结果数量。
 
-不在初版实现“任意 Python 执行”或远程文件服务。此取舍让安全策略、失败行为和面试讲解都保持清楚，同时足以完成真实的编辑-测试-修复任务。
+GUI 通过 `mutation_confirmer` 在写入工具生成 Diff 后、实际原子写入前请求用户批准；拒绝会把 `approved=false` 的结构化结果返回模型，文件不会改变。CLI 未提供该回调时保持自动执行（命令仍遵循自身确认策略）。不在初版实现“任意 Python 执行”或远程文件服务。此取舍让安全策略、失败行为和面试讲解都保持清楚，同时足以完成真实的编辑-测试-修复任务。
 
 ## 可辩护的设计决策
 

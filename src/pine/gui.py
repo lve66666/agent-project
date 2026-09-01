@@ -259,7 +259,7 @@ class PineGui(ttk.Frame):
             trace = trace or TraceWriter(config.trace_dir)
             trace.record("execution_started" if task else "run_started", task=active_task, workspace=str(config.workspace), model=settings.model)
             client = OpenAICompatibleClient(api_key=settings.api_key, base_url=settings.base_url, model=settings.model)
-            result = AgentLoop(client, build_default_registry(workspace, runner), max_turns=settings.max_turns, max_seconds=settings.max_seconds, cancelled=self.cancelled, trace=trace, on_event=self._on_agent_event).run(active_task)
+            result = AgentLoop(client, build_default_registry(workspace, runner, mutation_confirmer=self._confirm_diff), max_turns=settings.max_turns, max_seconds=settings.max_seconds, cancelled=self.cancelled, trace=trace, on_event=self._on_agent_event).run(active_task)
             self.events.put(("result", {"result": result, "trace": trace.path}))
         except (ConfigurationError, WorkspaceError, OSError, ValueError) as error:
             self.events.put(("fatal", {"error": str(error)}))
@@ -284,6 +284,14 @@ class PineGui(ttk.Frame):
         except queue.Empty:
             return False
 
+    def _confirm_diff(self, tool: str, path: str, diff: str) -> bool:
+        reply: queue.Queue[bool] = queue.Queue(maxsize=1)
+        self.events.put(("diff_confirm", {"tool": tool, "path": path, "diff": diff, "reply": reply}))
+        try:
+            return reply.get(timeout=300)
+        except queue.Empty:
+            return False
+
     def _stop_run(self) -> None:
         self.cancelled.set()
         self.status_var.set("Stopping after the current request")
@@ -296,6 +304,8 @@ class PineGui(ttk.Frame):
                 if kind == "confirm":
                     allowed = messagebox.askyesno("Allow command?", f"Run this command in the selected workspace?\n\n{payload['command']}", parent=self.master)
                     payload["reply"].put(allowed)
+                elif kind == "diff_confirm":
+                    self._show_diff_review(payload)
                 elif kind == "agent":
                     self._render_agent_event(payload)
                 elif kind == "plan_ready":
@@ -377,6 +387,38 @@ class PineGui(ttk.Frame):
         ttk.Button(actions, text="Execute Approved Plan", command=execute, style="Accent.TButton").grid(row=0, column=1)
         dialog.protocol("WM_DELETE_WINDOW", cancel)
 
+    def _show_diff_review(self, payload: dict[str, Any]) -> None:
+        """Display a pending file change and resolve the worker's approval queue."""
+        dialog = tk.Toplevel(self.master)
+        dialog.title(f"Review {payload['tool']}: {payload['path']}")
+        dialog.transient(self.master)
+        dialog.geometry("820x620")
+        dialog.minsize(640, 440)
+        dialog.grab_set()
+        body = ttk.Frame(dialog, padding=16)
+        body.grid(sticky="nsew")
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(2, weight=1)
+        ttk.Label(body, text="Review file change", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(body, text=f"{payload['tool']} will modify {payload['path']}. No write has happened yet.", style="Hint.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 8))
+        diff_box = scrolledtext.ScrolledText(body, wrap=tk.NONE, font=("Consolas", 10), relief="solid", borderwidth=1)
+        diff_box.grid(row=2, column=0, sticky="nsew")
+        diff_box.insert("1.0", payload.get("diff") or "(no content changes)")
+        diff_box.configure(state="disabled")
+        actions = ttk.Frame(body)
+        actions.grid(row=3, column=0, sticky="e", pady=(12, 0))
+
+        def resolve(approved: bool) -> None:
+            payload["reply"].put(approved)
+            dialog.grab_release()
+            dialog.destroy()
+
+        ttk.Button(actions, text="Reject Change", command=lambda: resolve(False)).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(actions, text="Approve Change", command=lambda: resolve(True), style="Accent.TButton").grid(row=0, column=1)
+        dialog.protocol("WM_DELETE_WINDOW", lambda: resolve(False))
+
     def _render_agent_event(self, event: dict[str, Any]) -> None:
         name = event["event"]
         label = "Plan" if event.get("phase") == "plan" else "Turn"
@@ -392,8 +434,10 @@ class PineGui(ttk.Frame):
                     import json
                     payload = json.loads(event["content"])
                     diff = payload.get("diff", "")
+                    state = "approved" if payload.get("approved", True) else "rejected"
                 except (TypeError, ValueError):
                     diff = ""
+                    state = "ok"
                 self._append(f"[{label} {event['turn']}] {event['tool']}: {state}. Diff:\n{diff or '(no content changes)'}\n")
             else:
                 preview = str(event["content"]).replace("\n", " ")[:180]

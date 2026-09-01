@@ -74,6 +74,28 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(result.failure_count, 0)
         self.assertEqual(json.loads(result.tool_results[0].content)["returncode"], 0)
 
+    def test_mutation_confirmation_happens_before_write(self) -> None:
+        approvals: list[tuple[str, str, str]] = []
+
+        def deny(tool: str, path: str, diff: str) -> bool:
+            approvals.append((tool, path, diff))
+            return False
+
+        denied_registry = build_default_registry(
+            Workspace(self.root),
+            CommandRunner(Workspace(self.root), approve_all=True),
+            mutation_confirmer=deny,
+        )
+        model = FakeModel([
+            AssistantReply(None, (ToolCall("call-1", "write_file", json.dumps({"path": "blocked.txt", "content": "no\n"})),)),
+            AssistantReply("Change was rejected."),
+        ])
+        result = AgentLoop(model, denied_registry, max_turns=2, max_seconds=30).run("write a file")
+        self.assertFalse((self.root / "blocked.txt").exists())
+        self.assertEqual(approvals[0][0:2], ("write_file", "blocked.txt"))
+        self.assertIn("+no", approvals[0][2])
+        self.assertEqual(result.failure_count, 1)
+
     def test_loop_emits_observable_local_events(self) -> None:
         events = []
         model = FakeModel([

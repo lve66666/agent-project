@@ -117,7 +117,14 @@ def _record_tool_outcome(name: str, arguments_text: str, result: ToolResult) -> 
     if not isinstance(arguments, dict):
         arguments = {}
     if name in {"write_file", "edit_file"}:
-        return {"modified_file": arguments.get("path") if isinstance(arguments.get("path"), str) else None, "command": None, "test_outcome": None, "failed": not result.ok}
+        approved = True
+        try:
+            decoded = json.loads(result.content)
+            if isinstance(decoded, dict) and decoded.get("approved") is False:
+                approved = False
+        except (TypeError, json.JSONDecodeError):
+            pass
+        return {"modified_file": arguments.get("path") if isinstance(arguments.get("path"), str) else None, "command": None, "test_outcome": None, "failed": (not result.ok) or not approved}
     if name != "run_command":
         return {"modified_file": None, "command": None, "test_outcome": None, "failed": not result.ok}
     command = arguments.get("command") if isinstance(arguments.get("command"), str) else None

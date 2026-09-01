@@ -65,7 +65,10 @@ def _validate_arguments(definition: ToolDefinition, arguments: dict[str, Any]) -
             raise ValueError(f"{name} must be {expected_type.__name__}")
 
 
-def build_default_registry(workspace: Workspace, runner: CommandRunner) -> ToolRegistry:
+MutationConfirmer = Callable[[str, str, str], bool]
+
+
+def build_default_registry(workspace: Workspace, runner: CommandRunner, mutation_confirmer: MutationConfirmer | None = None) -> ToolRegistry:
     def list_files(path: str = ".", depth: int = 2) -> str:
         return workspace.list_files(path, depth)
 
@@ -80,10 +83,13 @@ def build_default_registry(workspace: Workspace, runner: CommandRunner) -> ToolR
             if b"\x00" in raw:
                 raise ValueError("cannot diff binary files")
             before = raw.decode("utf-8")
-        message = workspace.write_file(path, content)
         relative = target.relative_to(workspace.root).as_posix()
+        diff = make_unified_diff(before, content, relative)
+        if mutation_confirmer and not mutation_confirmer("write_file", relative, diff):
+            return json.dumps({"approved": False, "path": relative, "message": "write rejected by user", "diff": diff}, ensure_ascii=False)
+        message = workspace.write_file(path, content)
         return json.dumps(
-            {"path": relative, "message": message, "diff": make_unified_diff(before, content, relative)},
+            {"approved": True, "path": relative, "message": message, "diff": diff},
             ensure_ascii=False,
         )
 
@@ -94,10 +100,13 @@ def build_default_registry(workspace: Workspace, runner: CommandRunner) -> ToolR
             raise ValueError("cannot diff binary files")
         before = raw.decode("utf-8")
         updated = before.replace(old_text, new_text, -1 if replace_all else 1)
-        message = workspace.edit_file(path, old_text, new_text, replace_all)
         relative = target.relative_to(workspace.root).as_posix()
+        diff = make_unified_diff(before, updated, relative)
+        if mutation_confirmer and not mutation_confirmer("edit_file", relative, diff):
+            return json.dumps({"approved": False, "path": relative, "message": "edit rejected by user", "diff": diff}, ensure_ascii=False)
+        message = workspace.edit_file(path, old_text, new_text, replace_all)
         return json.dumps(
-            {"path": relative, "message": message, "diff": make_unified_diff(before, updated, relative)},
+            {"approved": True, "path": relative, "message": message, "diff": diff},
             ensure_ascii=False,
         )
 
