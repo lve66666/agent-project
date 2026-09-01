@@ -14,6 +14,7 @@ Pine Agent 是一个从零实现的本地 Coding Agent。它通过 OpenAI 兼容
 - **修改审批**：GUI 在 `write_file` 或 `edit_file` 真正写入前弹出 Diff 预览；选择 `Reject Change` 时文件保持不变，批准后才执行原子写入。
 - **网络容错**：模型客户端对 408、429、425、5xx 和网络超时执行有限指数退避；401、403、404 和协议错误不会盲目重试。
 - **可审计 trace**：每次运行在 `runs/` 生成 JSONL 事件，包括请求、回复、工具调用、工具结果和最终原因；敏感字段和 API key 会脱敏。
+- **可注入 Mock LLM**：`pine.mock_model.ScriptedMockModel` 可按脚本返回模型回复并记录上下文；`tools/mock_mechanism_demo.py` 在无网络、无密钥条件下演示失败反馈驱动的下一步动作。
 
 ## 环境要求
 
