@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -23,11 +24,18 @@ class ModelClient(Protocol):
 
 
 class OpenAICompatibleClient:
-    def __init__(self, *, api_key: str, base_url: str, model: str, timeout_seconds: int = 60) -> None:
+    def __init__(self, *, api_key: str, base_url: str, model: str, timeout_seconds: int = 60, max_retries: int = 2, backoff_seconds: float = 0.5, sleeper=time.sleep) -> None:
+        if max_retries < 0:
+            raise ValueError("max_retries must be non-negative")
+        if backoff_seconds < 0:
+            raise ValueError("backoff_seconds must be non-negative")
         self.api_key = api_key
         self.endpoint = f"{base_url.rstrip('/')}/chat/completions"
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.max_retries = max_retries
+        self.backoff_seconds = backoff_seconds
+        self._sleeper = sleeper
 
     def complete(self, messages: list[Message], tools: list[dict]) -> AssistantReply:
         payload = json.dumps({"model": self.model, "messages": messages, "tools": tools}).encode("utf-8")
@@ -37,19 +45,41 @@ class OpenAICompatibleClient:
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
             method="POST",
         )
-        try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                body = response.read().decode("utf-8")
-        except HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")[:500]
-            raise ModelError(f"model HTTP {error.code}: {detail}") from error
-        except (URLError, TimeoutError) as error:
-            raise ModelError(f"model request failed: {error}") from error
+        body: str | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urlopen(request, timeout=self.timeout_seconds) as response:
+                    body = response.read().decode("utf-8")
+                break
+            except HTTPError as error:
+                detail = error.read().decode("utf-8", errors="replace")[:500]
+                if not _is_retryable_status(error.code) or attempt >= self.max_retries:
+                    raise ModelError(f"model HTTP {error.code}: {detail}") from error
+                self._wait_before_retry(attempt, error.headers.get("Retry-After"))
+            except (URLError, TimeoutError) as error:
+                if attempt >= self.max_retries:
+                    raise ModelError(f"model request failed: {error}") from error
+                self._wait_before_retry(attempt)
+        if body is None:
+            raise ModelError("model request failed without a response")
         try:
             decoded = json.loads(body)
         except json.JSONDecodeError as error:
             raise ModelProtocolError("model returned invalid JSON") from error
         return parse_chat_completion(decoded)
+
+    def _wait_before_retry(self, attempt: int, retry_after: str | None = None) -> None:
+        delay = self.backoff_seconds * (2 ** attempt)
+        if retry_after:
+            try:
+                delay = max(0.0, min(float(retry_after), 30.0))
+            except ValueError:
+                pass
+        self._sleeper(delay)
+
+
+def _is_retryable_status(status: int) -> bool:
+    return status in {408, 425, 429} or 500 <= status <= 599
 
 
 def parse_chat_completion(payload: object) -> AssistantReply:

@@ -36,14 +36,16 @@ The approved plan is included with the original task as execution guidance, not 
 | `command_runner.py` | subprocess 生命周期、超时、stdout/stderr 合并截断、退出码归一化 | 命令会卡住或失败，错误必须成为下一轮可用信息。 |
 | `context.py` | 消息预算估计、工具结果局部压缩、保留集选择、早期段摘要和工具调用配对 | 原样累积历史会超出模型上下文且破坏调用协议。 |
 | `trace.py` | JSONL 事件序列、敏感字段遮蔽、运行 ID、最终汇总 | 演示、调试和面试时能够还原“为何这么做”。 |
+| `model_client.py` | OpenAI 兼容请求、响应协议解析、临时 HTTP/网络错误的有限指数退避 | 网络抖动不应直接终止任务，但永久认证和协议错误应立即暴露。 |
 
 ## 工具边界
 
-当前提供五个工具：
+当前提供六个工具：
 
 - `list_files(path, depth)`：遍历工作区内的文本目录，跳过被忽略目录与超深路径。
 - `read_file(path, start_line, end_line)`：读取 UTF-8 文本，返回行号并限制字节数。
 - `write_file(path, content)`：仅写工作区普通文件，先创建父目录，再原子替换；不写二进制。
+- `edit_file(path, old_text, new_text, replace_all)`：在 UTF-8 文本中精确替换指定片段；默认要求旧片段只出现一次，避免误改，支持显式 `replace_all`。
 - `run_command(command, cwd, timeout_seconds)`：在工作区内运行；默认先征得交互确认，`--yes` 只用于演示；强制超时和输出上限。
 - `search_text(query, path, max_results, use_regex)`：搜索工作区内 UTF-8 文本，跳过受保护目录、二进制和超大文件，并限制结果数量。
 

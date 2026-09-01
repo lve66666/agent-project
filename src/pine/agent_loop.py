@@ -116,7 +116,7 @@ def _record_tool_outcome(name: str, arguments_text: str, result: ToolResult) -> 
         arguments = {}
     if not isinstance(arguments, dict):
         arguments = {}
-    if name == "write_file":
+    if name in {"write_file", "edit_file"}:
         return {"modified_file": arguments.get("path") if isinstance(arguments.get("path"), str) else None, "command": None, "test_outcome": None, "failed": not result.ok}
     if name != "run_command":
         return {"modified_file": None, "command": None, "test_outcome": None, "failed": not result.ok}

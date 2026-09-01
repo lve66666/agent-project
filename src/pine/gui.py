@@ -387,14 +387,14 @@ class PineGui(ttk.Frame):
             self._append(f"[{label} {event['turn']}] Model requested: {', '.join(tools) if tools else 'final response'}.\n")
         elif name == "tool_result":
             state = "ok" if event["ok"] else "failed"
-            if event["tool"] == "write_file" and event["ok"]:
+            if event["tool"] in {"write_file", "edit_file"} and event["ok"]:
                 try:
                     import json
                     payload = json.loads(event["content"])
                     diff = payload.get("diff", "")
                 except (TypeError, ValueError):
                     diff = ""
-                self._append(f"[{label} {event['turn']}] write_file: {state}. Diff:\n{diff or '(no content changes)'}\n")
+                self._append(f"[{label} {event['turn']}] {event['tool']}: {state}. Diff:\n{diff or '(no content changes)'}\n")
             else:
                 preview = str(event["content"]).replace("\n", " ")[:180]
                 self._append(f"[{label} {event['turn']}] {event['tool']}: {state}. {preview}\n")

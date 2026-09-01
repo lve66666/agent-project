@@ -87,6 +87,20 @@ def build_default_registry(workspace: Workspace, runner: CommandRunner) -> ToolR
             ensure_ascii=False,
         )
 
+    def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
+        target = workspace.resolve_path(path, must_exist=True)
+        raw = target.read_bytes()
+        if b"\x00" in raw:
+            raise ValueError("cannot diff binary files")
+        before = raw.decode("utf-8")
+        updated = before.replace(old_text, new_text, -1 if replace_all else 1)
+        message = workspace.edit_file(path, old_text, new_text, replace_all)
+        relative = target.relative_to(workspace.root).as_posix()
+        return json.dumps(
+            {"path": relative, "message": message, "diff": make_unified_diff(before, updated, relative)},
+            ensure_ascii=False,
+        )
+
     def run_command(command: str, cwd: str = ".", timeout_seconds: int = 30) -> str:
         result = runner.run(command, cwd, timeout_seconds)
         return json.dumps({"approved": result.approved, "returncode": result.returncode, "timed_out": result.timed_out, "truncated": result.truncated, "output": result.output}, ensure_ascii=False)
@@ -98,6 +112,7 @@ def build_default_registry(workspace: Workspace, runner: CommandRunner) -> ToolR
         ToolDefinition("list_files", "List files below a directory in the workspace.", _object_schema({"path": {"type": "string"}, "depth": {"type": "integer"}}), frozenset(), {"path": str, "depth": int}, list_files),
         ToolDefinition("read_file", "Read a UTF-8 text file with line numbers.", _object_schema({"path": {"type": "string"}, "start_line": {"type": "integer"}, "end_line": {"type": "integer"}}, ["path"]), frozenset({"path"}), {"path": str, "start_line": int, "end_line": int}, read_file),
         ToolDefinition("write_file", "Atomically write UTF-8 text to a workspace file.", _object_schema({"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]), frozenset({"path", "content"}), {"path": str, "content": str}, write_file),
+        ToolDefinition("edit_file", "Replace an exact UTF-8 text fragment in a workspace file.", _object_schema({"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}, "replace_all": {"type": "boolean"}}, ["path", "old_text", "new_text"]), frozenset({"path", "old_text", "new_text"}), {"path": str, "old_text": str, "new_text": str, "replace_all": bool}, edit_file),
         ToolDefinition("run_command", "Run a shell command in the workspace with a time limit.", _object_schema({"command": {"type": "string"}, "cwd": {"type": "string"}, "timeout_seconds": {"type": "integer"}}, ["command"]), frozenset({"command"}), {"command": str, "cwd": str, "timeout_seconds": int}, run_command),
         ToolDefinition("search_text", "Search workspace UTF-8 source files by literal text or regular expression.", _object_schema({"query": {"type": "string"}, "path": {"type": "string"}, "max_results": {"type": "integer"}, "use_regex": {"type": "boolean"}}, ["query"]), frozenset({"query"}), {"query": str, "path": str, "max_results": int, "use_regex": bool}, search_workspace),
     ])

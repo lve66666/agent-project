@@ -21,6 +21,18 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(self.workspace.read_file("package/example.py", 2, 3), "    2: two\n    3: three")
         self.assertIn("package/", self.workspace.list_files(".", depth=2))
 
+    def test_edit_file_replaces_one_exact_occurrence(self) -> None:
+        self.workspace.write_file("example.py", "value = 1\nvalue = 1\n")
+        with self.assertRaisesRegex(WorkspaceError, "occurs 2"):
+            self.workspace.edit_file("example.py", "value = 1", "value = 2")
+        self.workspace.edit_file("example.py", "value = 1", "value = 2", replace_all=True)
+        self.assertEqual((self.root / "example.py").read_text(encoding="utf-8"), "value = 2\nvalue = 2\n")
+
+    def test_edit_file_rejects_missing_text(self) -> None:
+        self.workspace.write_file("example.py", "value = 1\n")
+        with self.assertRaisesRegex(WorkspaceError, "not found"):
+            self.workspace.edit_file("example.py", "missing", "new")
+
     def test_parent_traversal_is_rejected(self) -> None:
         with self.assertRaisesRegex(WorkspaceError, "escapes"):
             self.workspace.read_file("../secret.txt")

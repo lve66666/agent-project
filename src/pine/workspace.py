@@ -101,3 +101,31 @@ class Workspace:
             Path(temporary_name).unlink(missing_ok=True)
             raise
         return f"wrote {len(encoded)} bytes to {target.relative_to(self.root).as_posix()}"
+
+    def edit_file(self, path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
+        """Replace an exact text fragment without requiring a full-file rewrite."""
+        if not isinstance(old_text, str) or not old_text:
+            raise WorkspaceError("old_text must be a non-empty string")
+        if not isinstance(new_text, str):
+            raise WorkspaceError("new_text must be a string")
+        if type(replace_all) is not bool:
+            raise WorkspaceError("replace_all must be a boolean")
+        target = self.resolve_path(path, must_exist=True)
+        if not target.is_file():
+            raise WorkspaceError("edit_file requires a regular file")
+        if target.stat().st_size > self.MAX_FILE_BYTES:
+            raise WorkspaceError(f"file exceeds {self.MAX_FILE_BYTES} byte limit")
+        raw = target.read_bytes()
+        if b"\x00" in raw:
+            raise WorkspaceError("binary files cannot be edited")
+        try:
+            original = raw.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise WorkspaceError("file is not valid UTF-8 text") from error
+        occurrences = original.count(old_text)
+        if occurrences == 0:
+            raise WorkspaceError("old_text was not found")
+        if occurrences > 1 and not replace_all:
+            raise WorkspaceError(f"old_text occurs {occurrences} times; set replace_all=true to replace all")
+        updated = original.replace(old_text, new_text, -1 if replace_all else 1)
+        return self.write_file(path, updated)
