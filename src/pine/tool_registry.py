@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .command_runner import CommandRunner
+from .diff import make_unified_diff
 from .protocol import ToolCall, ToolResult
 from .workspace import Workspace
 from .search import search_text
@@ -72,7 +73,19 @@ def build_default_registry(workspace: Workspace, runner: CommandRunner) -> ToolR
         return workspace.read_file(path, start_line, end_line)
 
     def write_file(path: str, content: str) -> str:
-        return workspace.write_file(path, content)
+        target = workspace.resolve_path(path)
+        before: str | None = None
+        if target.exists():
+            raw = target.read_bytes()
+            if b"\x00" in raw:
+                raise ValueError("cannot diff binary files")
+            before = raw.decode("utf-8")
+        message = workspace.write_file(path, content)
+        relative = target.relative_to(workspace.root).as_posix()
+        return json.dumps(
+            {"path": relative, "message": message, "diff": make_unified_diff(before, content, relative)},
+            ensure_ascii=False,
+        )
 
     def run_command(command: str, cwd: str = ".", timeout_seconds: int = 30) -> str:
         result = runner.run(command, cwd, timeout_seconds)

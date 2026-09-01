@@ -61,7 +61,15 @@ def main(argv: list[str] | None = None) -> int:
     result = AgentLoop(client, registry, max_turns=settings.max_turns, max_seconds=settings.max_seconds, trace=trace).run(args.task)
     print(result.summary)
     print(f"Stop reason: {result.reason.value}; turns: {result.turns}; tool calls: {len(result.tool_results)}")
+    print(f"Modified files: {', '.join(result.modified_files) if result.modified_files else '(none)'}")
+    print(f"Commands: {len(result.commands)}; tests: {_test_status(result.tests_passed)}; failures: {result.failure_count}")
     return 0 if result.reason.value == "completed" else 1
+
+
+def _test_status(value: bool | None) -> str:
+    if value is None:
+        return "not detected"
+    return "passed" if value else "failed"
 
 
 if __name__ == "__main__":

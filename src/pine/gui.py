@@ -311,6 +311,9 @@ class PineGui(ttk.Frame):
                     result = payload["result"]
                     self._append(f"\nResult: {result.summary}\n")
                     self._append(f"Stop reason: {result.reason.value}; turns: {result.turns}; tool calls: {len(result.tool_results)}\n")
+                    self._append(f"Modified files: {', '.join(result.modified_files) if result.modified_files else '(none)'}\n")
+                    test_status = "not detected" if result.tests_passed is None else ("passed" if result.tests_passed else "failed")
+                    self._append(f"Commands: {len(result.commands)}; tests: {test_status}; failures: {result.failure_count}\n")
                     self._append(f"Trace: {payload['trace']}\n")
                     self._finish_run(result.reason.value)
                 elif kind == "fatal":
@@ -384,8 +387,17 @@ class PineGui(ttk.Frame):
             self._append(f"[{label} {event['turn']}] Model requested: {', '.join(tools) if tools else 'final response'}.\n")
         elif name == "tool_result":
             state = "ok" if event["ok"] else "failed"
-            preview = str(event["content"]).replace("\n", " ")[:180]
-            self._append(f"[{label} {event['turn']}] {event['tool']}: {state}. {preview}\n")
+            if event["tool"] == "write_file" and event["ok"]:
+                try:
+                    import json
+                    payload = json.loads(event["content"])
+                    diff = payload.get("diff", "")
+                except (TypeError, ValueError):
+                    diff = ""
+                self._append(f"[{label} {event['turn']}] write_file: {state}. Diff:\n{diff or '(no content changes)'}\n")
+            else:
+                preview = str(event["content"]).replace("\n", " ")[:180]
+                self._append(f"[{label} {event['turn']}] {event['tool']}: {state}. {preview}\n")
         elif name in {"model_error", "protocol_error"}:
             self._append(f"[{label} {event['turn']}] {name}: {event['error']}\n")
         elif name == "run_finished":

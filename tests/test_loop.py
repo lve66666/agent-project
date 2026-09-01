@@ -54,6 +54,25 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(result.turns, 3)
         self.assertEqual((self.root / "answer.txt").read_text(encoding="utf-8"), "42\n")
         self.assertEqual([request[0][-1]["role"] for request in model.requests[1:]], ["tool", "tool"])
+        self.assertEqual(result.modified_files, ("answer.txt",))
+        self.assertEqual(result.commands, ())
+        self.assertIsNone(result.tests_passed)
+        self.assertEqual(result.failure_count, 0)
+
+    def test_run_summary_tracks_commands_and_test_outcome(self) -> None:
+        (self.root / "test_sample.py").write_text(
+            "import unittest\n\nclass Sample(unittest.TestCase):\n    def test_placeholder(self):\n        pass\n",
+            encoding="utf-8",
+        )
+        model = FakeModel([
+            AssistantReply(None, (ToolCall("call-1", "run_command", json.dumps({"command": "python -m unittest discover -s ."})),)),
+            AssistantReply("Tests completed."),
+        ])
+        result = AgentLoop(model, self.registry, max_turns=2, max_seconds=30).run("run tests")
+        self.assertEqual(result.commands, ("python -m unittest discover -s .",))
+        self.assertTrue(result.tests_passed)
+        self.assertEqual(result.failure_count, 0)
+        self.assertEqual(json.loads(result.tool_results[0].content)["returncode"], 0)
 
     def test_loop_emits_observable_local_events(self) -> None:
         events = []

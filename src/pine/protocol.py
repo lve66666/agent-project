@@ -43,6 +43,10 @@ class RunResult:
     summary: str
     turns: int
     tool_results: tuple[ToolResult, ...] = field(default_factory=tuple)
+    modified_files: tuple[str, ...] = field(default_factory=tuple)
+    commands: tuple[str, ...] = field(default_factory=tuple)
+    tests_passed: bool | None = None
+    failure_count: int = 0
 
 
 Message = dict[str, Any]
