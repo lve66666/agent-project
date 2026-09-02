@@ -16,6 +16,7 @@ from .command_runner import CommandRunner
 from .config import ConfigurationError, load_settings
 from .model_client import ModelError, OpenAICompatibleClient
 from .planning import run_read_only_plan
+from .session import SessionStore
 from .tool_registry import build_default_registry
 from .trace import TraceWriter
 from .workspace import Workspace, WorkspaceError
@@ -32,6 +33,7 @@ class GuiRunConfig:
     max_seconds: int
     trace_dir: Path
     approve_all: bool
+    session_id: str | None = None
 
 
 class PineGui(ttk.Frame):
@@ -43,6 +45,9 @@ class PineGui(ttk.Frame):
         self.events: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
         self.cancelled = threading.Event()
         self.running = False
+        self.session_store = SessionStore()
+        self.continuation_session_id: str | None = None
+        self.session_items: list[Any] = []
         self._build_variables()
         self._build_layout()
         self.after(100, self._drain_events)
@@ -85,6 +90,20 @@ class PineGui(ttk.Frame):
         self._setting_row(settings, 5, "Trace directory", self.trace_var, self._choose_trace_dir)
         ttk.Checkbutton(settings, text="Auto-approve commands", variable=self.approve_var).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
         ttk.Label(settings, text="Without auto-approve, every command opens a confirmation dialog.", wraplength=270, style="Hint.TLabel").grid(row=7, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        history = ttk.LabelFrame(settings, text="Chat History", padding=8)
+        history.grid(row=8, column=0, columnspan=3, sticky="nsew", pady=(14, 0))
+        history.columnconfigure(0, weight=1)
+        self.history_list = tk.Listbox(history, height=9, width=32, exportselection=False)
+        self.history_list.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        scrollbar = ttk.Scrollbar(history, orient="vertical", command=self.history_list.yview)
+        scrollbar.grid(row=0, column=2, sticky="ns")
+        self.history_list.configure(yscrollcommand=scrollbar.set)
+        self.history_list.bind("<<ListboxSelect>>", self._select_session)
+        self.history_list.bind("<Double-1>", lambda _event: self._continue_selected())
+        ttk.Button(history, text="Continue Selected", command=self._continue_selected).grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(history, text="Clear History", command=self._clear_history).grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=(8, 0))
+        self.history_hint_var = tk.StringVar(value="Select a session to view its summary.")
+        ttk.Label(history, textvariable=self.history_hint_var, wraplength=240, style="Hint.TLabel").grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
         content = ttk.Frame(self)
         content.grid(row=1, column=1, sticky="nsew", pady=(14, 0))
@@ -108,6 +127,52 @@ class PineGui(ttk.Frame):
         self.log_box = scrolledtext.ScrolledText(content, wrap=tk.WORD, font=("Consolas", 10), state="disabled", relief="solid", borderwidth=1)
         self.log_box.grid(row=4, column=0, sticky="nsew", pady=(6, 0))
         content.rowconfigure(4, weight=1)
+        self._refresh_history()
+
+    def _refresh_history(self) -> None:
+        if not hasattr(self, "history_list"):
+            return
+        workspace = Path(self.workspace_var.get()).expanduser()
+        self.session_items = self.session_store.load(workspace) if workspace.is_dir() else []
+        self.history_list.delete(0, tk.END)
+        for item in reversed(self.session_items):
+            stamp = item.timestamp.replace("T", " ")[:16]
+            title = item.task.replace("\n", " ").strip()[:48] or "Untitled task"
+            self.history_list.insert(tk.END, f"{stamp}  {title}")
+
+    def _selected_session(self):
+        selection = self.history_list.curselection()
+        if not selection:
+            return None
+        index = len(self.session_items) - 1 - selection[0]
+        return self.session_items[index] if 0 <= index < len(self.session_items) else None
+
+    def _select_session(self, _event=None) -> None:
+        item = self._selected_session()
+        if item:
+            self.history_hint_var.set(f"{item.summary[:280]}\nStop: {item.reason}; turns/messages: {len(item.transcript)}")
+
+    def _continue_selected(self) -> None:
+        item = self._selected_session()
+        if not item:
+            messagebox.showinfo("Chat History", "Select a session first.")
+            return
+        self.continuation_session_id = item.session_id
+        self.task_box.delete("1.0", tk.END)
+        self.task_box.insert("1.0", "Continue this task: ")
+        self.task_box.focus_set()
+        self.status_var.set(f"Continuing session {item.session_id[:8]}")
+        self._append(f"Loaded session from {item.timestamp}. Enter a follow-up task, then click Run Task.\n")
+
+    def _clear_history(self) -> None:
+        workspace = Path(self.workspace_var.get()).expanduser()
+        if not workspace.is_dir():
+            return
+        if messagebox.askyesno("Clear History", "Delete saved sessions for this workspace?", parent=self.master):
+            self.session_store.clear(workspace)
+            self.continuation_session_id = None
+            self._refresh_history()
+            self.history_hint_var.set("History cleared.")
 
     def _setting_row(self, parent: ttk.LabelFrame, row: int, label: str, variable: tk.StringVar, command=None, show: str | None = None) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4)
@@ -120,6 +185,7 @@ class PineGui(ttk.Frame):
         selected = filedialog.askdirectory(initialdir=self.workspace_var.get() or str(Path.cwd()))
         if selected:
             self.workspace_var.set(selected)
+            self._refresh_history()
 
     def _choose_trace_dir(self) -> None:
         selected = filedialog.askdirectory(initialdir=self.trace_var.get() or str(Path.cwd()))
@@ -189,9 +255,13 @@ class PineGui(ttk.Frame):
         return GuiRunConfig(task, workspace, api_key, self.base_url_var.get().strip(), self.model_var.get().strip(), max_turns, max_seconds, Path(self.trace_var.get()).expanduser(), self.approve_var.get())
 
     def _start_run(self) -> None:
+        selected_session_id = self.continuation_session_id
         config = self._read_config()
         if not config:
             return
+        config = GuiRunConfig(config.task, config.workspace, config.api_key, config.base_url, config.model,
+                              config.max_turns, config.max_seconds, config.trace_dir, config.approve_all,
+                              selected_session_id)
         self.running = True
         self.cancelled.clear()
         self.run_button.configure(state="disabled")
@@ -200,6 +270,7 @@ class PineGui(ttk.Frame):
         self.status_var.set("Running")
         self._clear_log()
         self._append("Run started. The API key is never displayed or logged.\n")
+        self.continuation_session_id = None
         threading.Thread(target=self._run_agent, args=(config,), daemon=True).start()
 
     def _start_plan(self) -> None:
@@ -246,8 +317,9 @@ class PineGui(ttk.Frame):
         except (ModelError, WorkspaceError, OSError, ValueError) as error:
             self.events.put(("fatal", {"error": str(error)}))
 
-    def _run_agent(self, config: GuiRunConfig, task: str | None = None, trace: TraceWriter | None = None) -> None:
+    def _run_agent(self, config: GuiRunConfig, task: str | None = None, trace: TraceWriter | None = None, session_id: str | None = None) -> None:
         try:
+            session_id = session_id or config.session_id
             previous = {name: os.environ.get(name) for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL")}
             os.environ["OPENAI_API_KEY"] = config.api_key
             os.environ["OPENAI_BASE_URL"] = config.base_url
@@ -258,9 +330,12 @@ class PineGui(ttk.Frame):
             active_task = task or config.task
             trace = trace or TraceWriter(config.trace_dir)
             trace.record("execution_started" if task else "run_started", task=active_task, workspace=str(config.workspace), model=settings.model)
+            if session_id:
+                trace.record("session_continued", session_id=session_id)
             client = OpenAICompatibleClient(api_key=settings.api_key, base_url=settings.base_url, model=settings.model)
-            result = AgentLoop(client, build_default_registry(workspace, runner, mutation_confirmer=self._confirm_diff), max_turns=settings.max_turns, max_seconds=settings.max_seconds, cancelled=self.cancelled, trace=trace, on_event=self._on_agent_event).run(active_task)
-            self.events.put(("result", {"result": result, "trace": trace.path}))
+            initial_messages = self.session_store.continue_messages(config.workspace, session_id) if session_id else None
+            result = AgentLoop(client, build_default_registry(workspace, runner, mutation_confirmer=self._confirm_diff), max_turns=settings.max_turns, max_seconds=settings.max_seconds, cancelled=self.cancelled, trace=trace, on_event=self._on_agent_event).run(active_task, initial_messages=initial_messages)
+            self.events.put(("result", {"result": result, "trace": trace.path, "config": config, "session_id": session_id}))
         except (ConfigurationError, WorkspaceError, OSError, ValueError) as error:
             self.events.put(("fatal", {"error": str(error)}))
         finally:
@@ -319,6 +394,10 @@ class PineGui(ttk.Frame):
                     self._finish_run(payload["reason"])
                 elif kind == "result":
                     result = payload["result"]
+                    config = payload.get("config")
+                    if config is not None:
+                        self.session_store.record(config.workspace, task=config.task, summary=result.summary, reason=result.reason.value, transcript=result.transcript, modified_files=result.modified_files, commands=result.commands, tests_passed=result.tests_passed, session_id=payload.get("session_id"))
+                        self._refresh_history()
                     self._append(f"\nResult: {result.summary}\n")
                     self._append(f"Stop reason: {result.reason.value}; turns: {result.turns}; tool calls: {len(result.tool_results)}\n")
                     self._append(f"Modified files: {', '.join(result.modified_files) if result.modified_files else '(none)'}\n")

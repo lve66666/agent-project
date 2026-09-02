@@ -33,8 +33,9 @@ class AgentLoop:
         if self.on_event:
             self.on_event(event, payload)
 
-    def run(self, task: str) -> RunResult:
-        messages: list[Message] = [{"role": "system", "content": self.system_prompt}, {"role": "user", "content": task}]
+    def run(self, task: str, initial_messages: list[Message] | None = None) -> RunResult:
+        history = [dict(message) for message in (initial_messages or []) if message.get("role") != "system"]
+        messages: list[Message] = [{"role": "system", "content": self.system_prompt}, *history, {"role": "user", "content": task}]
         results: list[ToolResult] = []
         modified_files: list[str] = []
         commands: list[str] = []
@@ -44,10 +45,10 @@ class AgentLoop:
         for turn in range(1, self.max_turns + 1):
             if self.cancelled.is_set():
                 self._emit("run_finished", reason=StopReason.CANCELLED.value, turns=turn - 1)
-                return _run_result(StopReason.CANCELLED, "Run cancelled by user.", turn - 1, results, modified_files, commands, test_outcomes, failure_count)
+                return _run_result(StopReason.CANCELLED, "Run cancelled by user.", turn - 1, results, modified_files, commands, test_outcomes, failure_count, messages)
             if time.monotonic() >= deadline:
                 self._emit("run_finished", reason=StopReason.TIMEOUT.value, turns=turn - 1)
-                return _run_result(StopReason.TIMEOUT, "Run exceeded its total time budget.", turn - 1, results, modified_files, commands, test_outcomes, failure_count)
+                return _run_result(StopReason.TIMEOUT, "Run exceeded its total time budget.", turn - 1, results, modified_files, commands, test_outcomes, failure_count, messages)
             try:
                 request_messages = self.context.prepare(messages)
                 self._emit("model_request", turn=turn, message_count=len(request_messages))
@@ -58,15 +59,15 @@ class AgentLoop:
                 self._emit("protocol_error", turn=turn, error=str(error))
                 if self.trace:
                     self.trace.record("protocol_error", turn=turn, error=str(error))
-                return _run_result(StopReason.PROTOCOL_ERROR, f"Model protocol error: {error}", turn - 1, results, modified_files, commands, test_outcomes, failure_count)
+                return _run_result(StopReason.PROTOCOL_ERROR, f"Model protocol error: {error}", turn - 1, results, modified_files, commands, test_outcomes, failure_count, messages)
             except ModelError as error:
                 self._emit("model_error", turn=turn, error=str(error))
                 if self.trace:
                     self.trace.record("model_error", turn=turn, error=str(error))
-                return _run_result(StopReason.MODEL_ERROR, f"Model error: {error}", turn - 1, results, modified_files, commands, test_outcomes, failure_count)
+                return _run_result(StopReason.MODEL_ERROR, f"Model error: {error}", turn - 1, results, modified_files, commands, test_outcomes, failure_count, messages)
             except Exception as error:
                 self._emit("protocol_error", turn=turn, error=str(error))
-                return _run_result(StopReason.PROTOCOL_ERROR, f"Unexpected model client error: {error}", turn - 1, results, modified_files, commands, test_outcomes, failure_count)
+                return _run_result(StopReason.PROTOCOL_ERROR, f"Unexpected model client error: {error}", turn - 1, results, modified_files, commands, test_outcomes, failure_count, messages)
             messages.append(_assistant_message(reply))
             self._emit("assistant_reply", turn=turn, content=reply.content, tools=[call.name for call in reply.tool_calls])
             if self.trace:
@@ -75,7 +76,7 @@ class AgentLoop:
                 self._emit("run_finished", reason=StopReason.COMPLETED.value, turns=turn)
                 if self.trace:
                     self.trace.record("run_finished", reason=StopReason.COMPLETED.value, turns=turn)
-                return _run_result(StopReason.COMPLETED, reply.content or "Task completed.", turn, results, modified_files, commands, test_outcomes, failure_count)
+                return _run_result(StopReason.COMPLETED, reply.content or "Task completed.", turn, results, modified_files, commands, test_outcomes, failure_count, messages)
             for call in reply.tool_calls:
                 result = self.tools.execute(call)
                 results.append(result)
@@ -95,7 +96,7 @@ class AgentLoop:
         if self.trace:
             self.trace.record("run_finished", reason=StopReason.MAX_TURNS.value, turns=self.max_turns)
         self._emit("run_finished", reason=StopReason.MAX_TURNS.value, turns=self.max_turns)
-        return _run_result(StopReason.MAX_TURNS, "Run reached the maximum number of model turns.", self.max_turns, results, modified_files, commands, test_outcomes, failure_count)
+        return _run_result(StopReason.MAX_TURNS, "Run reached the maximum number of model turns.", self.max_turns, results, modified_files, commands, test_outcomes, failure_count, messages)
 
 
 def _assistant_message(reply: AssistantReply) -> Message:
@@ -105,8 +106,8 @@ def _assistant_message(reply: AssistantReply) -> Message:
     return message
 
 
-def _run_result(reason: StopReason, summary: str, turns: int, results: list[ToolResult], modified_files: list[str], commands: list[str], test_outcomes: list[bool], failure_count: int) -> RunResult:
-    return RunResult(reason, summary, turns, tuple(results), tuple(dict.fromkeys(modified_files)), tuple(commands), (all(test_outcomes) if test_outcomes else None), failure_count)
+def _run_result(reason: StopReason, summary: str, turns: int, results: list[ToolResult], modified_files: list[str], commands: list[str], test_outcomes: list[bool], failure_count: int, messages: list[Message]) -> RunResult:
+    return RunResult(reason, summary, turns, tuple(results), tuple(dict.fromkeys(modified_files)), tuple(commands), (all(test_outcomes) if test_outcomes else None), failure_count, tuple(messages))
 
 
 def _record_tool_outcome(name: str, arguments_text: str, result: ToolResult) -> dict[str, Any]:

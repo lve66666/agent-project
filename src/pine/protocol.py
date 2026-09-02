@@ -47,6 +47,7 @@ class RunResult:
     commands: tuple[str, ...] = field(default_factory=tuple)
     tests_passed: bool | None = None
     failure_count: int = 0
+    transcript: tuple[Message, ...] = field(default_factory=tuple)
 
 
 Message = dict[str, Any]

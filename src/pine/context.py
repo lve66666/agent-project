@@ -23,8 +23,9 @@ class ContextWindow:
         prepared = [self._compact_tool_message(message) for message in messages]
         if self._size(prepared) <= self.max_chars:
             return prepared
-        pinned = self._pinned(prepared)
-        remaining = prepared[len(pinned) :]
+        pinned_indices = self._pinned_indices(prepared)
+        pinned = [prepared[index] for index in pinned_indices]
+        remaining = [message for index, message in enumerate(prepared) if index not in pinned_indices]
         groups = _group_turns(remaining)
         kept: list[list[Message]] = []
         budget_used = self._size(pinned)
@@ -60,10 +61,17 @@ class ContextWindow:
         return compacted
 
     @staticmethod
-    def _pinned(messages: list[Message]) -> list[Message]:
-        system = next((message for message in messages if message.get("role") == "system"), None)
-        user = next((message for message in messages if message.get("role") == "user"), None)
-        return [message for message in (system, user) if message is not None]
+    def _pinned_indices(messages: list[Message]) -> list[int]:
+        indices: list[int] = []
+        system_index = next((index for index, message in enumerate(messages) if message.get("role") == "system"), None)
+        user_indices = [index for index, message in enumerate(messages) if message.get("role") == "user"]
+        if system_index is not None:
+            indices.append(system_index)
+        if user_indices:
+            latest_user = user_indices[-1]
+            if latest_user not in indices:
+                indices.append(latest_user)
+        return indices
 
     @staticmethod
     def _size(messages: list[Message]) -> int:

@@ -38,6 +38,14 @@ class OpenAICompatibleClient:
         self._sleeper = sleeper
 
     def complete(self, messages: list[Message], tools: list[dict]) -> AssistantReply:
+        try:
+            self.api_key.encode("ascii")
+        except UnicodeEncodeError as error:
+            raise ModelError("API key contains non-ASCII characters; paste the provider's ASCII key without quotes or spaces.") from error
+        try:
+            self.endpoint.encode("ascii")
+        except UnicodeEncodeError as error:
+            raise ModelError("Base URL contains non-ASCII characters; use the provider's plain URL.") from error
         payload = json.dumps({"model": self.model, "messages": messages, "tools": tools}).encode("utf-8")
         request = Request(
             self.endpoint,

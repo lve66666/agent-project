@@ -58,6 +58,14 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(result.commands, ())
         self.assertIsNone(result.tests_passed)
         self.assertEqual(result.failure_count, 0)
+        self.assertGreaterEqual(len(result.transcript), 5)
+
+    def test_initial_messages_are_injected(self) -> None:
+        model = FakeModel([AssistantReply("continued")])
+        history = [{"role": "user", "content": "previous"}, {"role": "assistant", "content": "answer"}]
+        result = AgentLoop(model, self.registry, max_turns=1, max_seconds=30).run("follow up", initial_messages=history)
+        self.assertEqual(result.reason, StopReason.COMPLETED)
+        self.assertEqual([m["role"] for m in model.requests[0][0]], ["system", "user", "assistant", "user"])
 
     def test_run_summary_tracks_commands_and_test_outcome(self) -> None:
         (self.root / "test_sample.py").write_text(

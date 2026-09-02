@@ -12,6 +12,7 @@ Pine Agent 是从零实现的本地 Coding Agent，通过 OpenAI 兼容 API 完�
 - 自行实现 AgentLoop、上下文裁剪、协议解析、工具注册/校验、错误处理、循环终止和 JSONL 审计。
 - 六个工具：list_files、search_text、read_file、write_file、edit_file、run_command；edit_file 精确替换。
 - write_file/edit_file 返回 unified diff，GUI 写入前弹窗审批；摘要统计修改文件、命令、测试和失败次数；模型临时错误有限退避重试。
+- GUI Chat History 按 workspace 保存会话；可点击 Continue Selected 继续原对话并更新同一条记录。历史 transcript 有大小限制且自动脱敏，sessions/ 不进入 Git。
 - ScriptedMockModel 可离线脚本化模型回复；tools/mock_mechanism_demo.py 演示失败反馈驱动下一步动作。
 
 演示项目：web_demo 成绩统计网页；grade_demo 成绩模块。

@@ -24,6 +24,12 @@ class FakeResponse:
 
 
 class ModelClientRetryTests(unittest.TestCase):
+    def test_rejects_non_ascii_api_key_before_http_request(self) -> None:
+        client = OpenAICompatibleClient(api_key="中文密钥", base_url="https://example.test/v1", model="test")
+        with self.assertRaises(ModelError) as context:
+            client.complete([], [])
+        self.assertIn("non-ASCII", str(context.exception))
+
     def test_retries_rate_limit_then_succeeds_with_backoff(self) -> None:
         error = HTTPError("https://example.test", 429, "rate limited", {}, BytesIO(b"busy"))
         sleeps: list[float] = []
